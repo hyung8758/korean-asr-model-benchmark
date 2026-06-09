@@ -1,0 +1,87 @@
+{
+  "engine": "faster_whisper",
+  "manifest_path": "benchmark_data/manifest.jsonl",
+  "result_root": "results",
+  "language": "ko",
+  "device": "cuda",
+  "device_index": 0,
+  "launcher": {
+    "gpu_ids": [0, 1, 2, 3, 4, 5],
+    "evaluate_after_decode": true
+  },
+  "decode_defaults": {
+    "task": "transcribe",
+    "temperature": 0.0,
+    "condition_on_previous_text": false,
+    "vad_filter": false,
+    "word_timestamps": false
+  },
+  "experiments": [
+    {
+      "name": "small_beam1_float16",
+      "model": "small",
+      "beam_size": 1,
+      "compute_type": "float16"
+    },
+    {
+      "name": "small_beam5_float16",
+      "model": "small",
+      "beam_size": 5,
+      "compute_type": "float16"
+    },
+    {
+      "name": "medium_beam1_float16",
+      "model": "medium",
+      "beam_size": 1,
+      "compute_type": "float16"
+    },
+    {
+      "name": "medium_beam5_float16",
+      "model": "medium",
+      "beam_size": 5,
+      "compute_type": "float16"
+    },
+    {
+      "name": "large-v3_beam1_float16",
+      "model": "large-v3",
+      "beam_size": 1,
+      "compute_type": "float16"
+    },
+    {
+      "name": "large-v3_beam5_float16",
+      "model": "large-v3",
+      "beam_size": 5,
+      "compute_type": "float16"
+    },
+    {
+      "name": "small_beam5_int8_float16",
+      "model": "small",
+      "beam_size": 5,
+      "compute_type": "int8_float16"
+    },
+    {
+      "name": "medium_beam5_int8_float16",
+      "model": "medium",
+      "beam_size": 5,
+      "compute_type": "int8_float16"
+    },
+    {
+      "name": "large-v3_beam5_int8_float16",
+      "model": "large-v3",
+      "beam_size": 5,
+      "compute_type": "int8_float16"
+    },
+    {
+      "name": "small_beam5_float32",
+      "model": "small",
+      "beam_size": 5,
+      "compute_type": "float32"
+    },
+    {
+      "name": "small_beam5_int8",
+      "model": "small",
+      "beam_size": 5,
+      "compute_type": "int8"
+    }
+  ]
+}

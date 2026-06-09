@@ -1,0 +1,53 @@
+{
+  "engine": "whisper_cpp_server_cpu",
+  "manifest_path": "benchmark_data/manifest.jsonl",
+  "result_root": "results",
+  "language": "ko",
+  "server_binary_path": "third_party/whisper.cpp/build/bin/whisper-server",
+  "host": "127.0.0.1",
+  "base_port": 8200,
+  "device": "cpu",
+  "device_index": 0,
+  "server_start_timeout_seconds": 180,
+  "request_timeout_seconds": null,
+  "warmup": true,
+  "require_server_timings": true,
+  "launcher": {
+    "num_jobs": 8,
+    "evaluate_after_decode": true
+  },
+  "decode_defaults": {
+    "temperature": 0.0,
+    "temperature_inc": 0.0,
+    "flash_attn": false,
+    "no_fallback": false,
+    "threads": 8,
+    "processors": 1,
+    "no_language_probabilities": true,
+    "server_extra_args": [],
+    "request_fields": {}
+  },
+  "experiments": [
+    {
+      "name": "tiny_q5_1_beam1_server_cpu",
+      "model": "tiny-q5_1",
+      "model_path": "third_party/whisper.cpp/models/ggml-tiny-q5_1.bin",
+      "beam_size": 1,
+      "quantization": "q5_1"
+    },
+    {
+      "name": "base_q5_1_beam1_server_cpu",
+      "model": "base-q5_1",
+      "model_path": "third_party/whisper.cpp/models/ggml-base-q5_1.bin",
+      "beam_size": 1,
+      "quantization": "q5_1"
+    },
+    {
+      "name": "small_q5_1_beam1_server_cpu",
+      "model": "small-q5_1",
+      "model_path": "third_party/whisper.cpp/models/ggml-small-q5_1.bin",
+      "beam_size": 1,
+      "quantization": "q5_1"
+    }
+  ]
+}

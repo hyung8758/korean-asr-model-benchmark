@@ -1,0 +1,24 @@
+# data / benchmark artifacts
+data/
+benchmark_data/
+results/
+protected_exp/
+
+# logs / outputs
+*.out
+nohup.out
+*.log
+
+# python cache
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# local / env
+.env
+.venv/
+venv/
+.DS_Store
+
+# third-party builds / external repos
+third_party/

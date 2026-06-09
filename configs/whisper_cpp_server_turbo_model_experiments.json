@@ -1,0 +1,46 @@
+{
+  "engine": "whisper_cpp_server",
+  "manifest_path": "benchmark_data/manifest.jsonl",
+  "result_root": "results",
+  "language": "ko",
+  "server_binary_path": "third_party/whisper.cpp/build/bin/whisper-server",
+  "host": "127.0.0.1",
+  "base_port": 8100,
+  "device": "cuda",
+  "device_index": 0,
+  "server_start_timeout_seconds": 180,
+  "request_timeout_seconds": null,
+  "warmup": true,
+  "require_server_timings": true,
+  "launcher": {
+    "gpu_ids": [0, 1, 2, 3, 4, 5],
+    "evaluate_after_decode": true
+  },
+  "decode_defaults": {
+    "temperature": 0.0,
+    "temperature_inc": 0.0,
+    "flash_attn": false,
+    "no_fallback": false,
+    "threads": 4,
+    "processors": 1,
+    "no_language_probabilities": true,
+    "server_extra_args": [],
+    "request_fields": {}
+  },
+  "experiments": [
+    {
+      "name": "large-v3-turbo_f16_beam1_server",
+      "model": "large-v3-turbo",
+      "model_path": "third_party/whisper.cpp/models/ggml-large-v3-turbo.bin",
+      "beam_size": 1,
+      "quantization": "f16"
+    },
+    {
+      "name": "large-v3-turbo_q5_0_beam1_server",
+      "model": "large-v3-turbo-q5_0",
+      "model_path": "third_party/whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin",
+      "beam_size": 1,
+      "quantization": "q5_0"
+    }
+  ]
+}

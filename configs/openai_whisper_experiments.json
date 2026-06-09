@@ -1,0 +1,61 @@
+{
+  "engine": "openai_whisper",
+  "manifest_path": "benchmark_data/manifest.jsonl",
+  "result_root": "results",
+  "language": "ko",
+  "device": "cuda:0",
+  "launcher": {
+    "gpu_ids": [0, 1, 2, 3, 4, 5],
+    "evaluate_after_decode": true
+  },
+  "decode_defaults": {
+    "task": "transcribe",
+    "temperature": 0.0,
+    "condition_on_previous_text": false,
+    "verbose": false
+  },
+  "experiments": [
+    {
+      "name": "small_beam1_fp16",
+      "model": "small",
+      "beam_size": 1,
+      "precision": "fp16"
+    },
+    {
+      "name": "small_beam5_fp16",
+      "model": "small",
+      "beam_size": 5,
+      "precision": "fp16"
+    },
+    {
+      "name": "medium_beam1_fp16",
+      "model": "medium",
+      "beam_size": 1,
+      "precision": "fp16"
+    },
+    {
+      "name": "medium_beam5_fp16",
+      "model": "medium",
+      "beam_size": 5,
+      "precision": "fp16"
+    },
+    {
+      "name": "large-v3_beam1_fp16",
+      "model": "large-v3",
+      "beam_size": 1,
+      "precision": "fp16"
+    },
+    {
+      "name": "large-v3_beam5_fp16",
+      "model": "large-v3",
+      "beam_size": 5,
+      "precision": "fp16"
+    },
+    {
+      "name": "small_beam5_fp32",
+      "model": "small",
+      "beam_size": 5,
+      "precision": "fp32"
+    }
+  ]
+}

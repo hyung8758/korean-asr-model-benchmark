@@ -1,0 +1,11 @@
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+torch==2.8.0+cu128
+torchaudio==2.8.0+cu128
+openai-whisper
+faster-whisper
+transformers
+accelerate
+qwen-asr
+requests
+tqdm

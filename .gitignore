@@ -3,6 +3,7 @@ data/
 benchmark_data/
 results/
 protected_exp/
+history/
 
 # logs / outputs
 *.out
@@ -20,5 +21,9 @@ __pycache__/
 venv/
 .DS_Store
 
-# third-party builds / external repos
-third_party/
+# third-party source can be tracked as submodules, but local builds/models stay out
+third_party/*
+!third_party/whisper.cpp/
+third_party/whisper.cpp/build*/
+third_party/whisper.cpp/models/*.bin
+third_party/whisper.cpp/models/*.gguf

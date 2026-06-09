@@ -1,0 +1,54 @@
+diff --git a/examples/server/server.cpp b/examples/server/server.cpp
+index aae74c3d..daa804f2 100644
+--- a/examples/server/server.cpp
++++ b/examples/server/server.cpp
+@@ -910,6 +910,8 @@ int main(int argc, char ** argv) {
+             fprintf(stderr, "\n");
+         }
+ 
++        int64_t inference_ms = 0;
++
+         // run the inference
+         {
+             printf("Running whisper.cpp inference on %s\n", filename.c_str());
+@@ -987,6 +989,7 @@ int main(int argc, char ** argv) {
+             };
+             wparams.abort_callback_user_data = (void*)&req;
+ 
++            const auto inference_start = std::chrono::steady_clock::now();
+             if (whisper_full_parallel(ctx, wparams, pcmf32.data(), pcmf32.size(), params.n_processors) != 0) {
+                 // handle failure or early abort
+                 if (req.is_connection_closed()) {
+@@ -1002,6 +1005,8 @@ int main(int argc, char ** argv) {
+                 res.set_content(error_resp, "application/json");
+                 return;
+             }
++            const auto inference_end = std::chrono::steady_clock::now();
++            inference_ms = std::chrono::duration_cast<std::chrono::milliseconds>(inference_end - inference_start).count();
+         }
+ 
+         // return results to user
+@@ -1061,6 +1066,10 @@ int main(int argc, char ** argv) {
+                 {"language", whisper_lang_str_full(whisper_full_lang_id(ctx))},
+                 {"duration", float(pcmf32.size())/WHISPER_SAMPLE_RATE},
+                 {"text", results},
++                {"timings", json{
++                    {"inference_ms", inference_ms},
++                    {"inference_sec", inference_ms / 1000.0}
++                }},
+                 {"segments", json::array()}
+             };
+             // Only compute language probabilities if requested (expensive operation)
+@@ -1135,7 +1144,11 @@ int main(int argc, char ** argv) {
+         {
+             std::string results = output_str(ctx, params, pcmf32s);
+             json jres = json{
+-                {"text", results}
++                {"text", results},
++                {"timings", json{
++                    {"inference_ms", inference_ms},
++                    {"inference_sec", inference_ms / 1000.0}
++                }}
+             };
+             res.set_content(jres.dump(-1, ' ', false, json::error_handler_t::replace),
+                             "application/json");

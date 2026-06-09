@@ -1,6 +1,6 @@
 ## Korean Whisper STT Benchmark
 
-한국어 utterance benchmark용 manifest를 만들고 Whisper 계열 엔진을 같은 포맷으로 비교한다.
+한국어 utterance benchmark용 manifest를 만들고 공개 ASR/STT 모델을 같은 포맷으로 비교한다.
 
 ### 설치
 
@@ -8,7 +8,26 @@
 pip install -r requirements.txt
 ```
 
+CUDA, whisper.cpp submodule, Hugging Face 모델 cache 등 환경 구축과 모델 세팅은 [INSTALL.md](INSTALL.md)를 참고한다.
+
+### 모델/엔진 준비
+
+이 benchmark는 6개 계열을 같은 manifest/result 포맷으로 실행한다.
+
+| 대상 | 준비 방식 | 설정 파일 |
+|---|---|---|
+| OpenAI Whisper | `openai-whisper` pip 설치 후 모델 자동 다운로드 | `configs/openai_whisper_experiments.json` |
+| faster-whisper | `faster-whisper` pip 설치 후 모델 자동 다운로드 | `configs/faster_whisper_experiments.json` |
+| whisper.cpp | git submodule + CMake build + ggml 모델 다운로드 | `configs/whisper_cpp_server_experiments.json` |
+| Qwen3-ASR | `qwen-asr`, `transformers`, `accelerate` 설치 후 HF 모델 자동 다운로드 | `configs/hf_asr_experiments.json` |
+| ghost613 Korean Whisper | `transformers` 기반 HF 모델 자동 다운로드 | `configs/hf_asr_experiments.json` |
+| CrisperWhisper | `transformers` 기반 HF 모델 자동 다운로드 | `configs/hf_asr_experiments.json` |
+
+각 엔진별 설치와 모델 다운로드 방법은 [INSTALL.md](INSTALL.md)에 정리되어 있다.
+
 ### 데이터 준비
+
+원본 corpus 배치와 manifest 생성 방법은 [INSTALL.md#data-preparation](INSTALL.md#data-preparation)을 참고한다.
 
 ```bash
 python scripts/prepare_whisper_benchmark_data.py \
@@ -46,9 +65,6 @@ python scripts/run_faster_whisper.py
 whisper.cpp server CUDA:
 
 ```bash
-cd third_party/whisper.cpp
-cmake --build build -j
-cd ../..
 python scripts/run_whisper_cpp_server.py
 ```
 
@@ -88,6 +104,8 @@ results/<engine>/<model>/<experiment>/
 ```
 
 `predictions.jsonl`에는 sample별 reference, prediction, segment timestamp, decode_time, RTF가 저장된다. `metrics.json`에는 전체/dataset/bucket별 CER, WER, RTF가 저장된다. CER/WER는 퍼센트 스케일이다.
+
+진행한 주요 실험 결과와 분석은 [exp_result.md](exp_result.md)에 정리한다.
 
 HF 강화 모델:
 

@@ -1,6 +1,5 @@
 import argparse
 import logging
-import subprocess
 import sys
 from pathlib import Path
 
@@ -8,17 +7,16 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from stt_benchmark.config import load_config
-from stt_benchmark.faster_whisper_runner import apply_overrides, build_run_config, run_faster_whisper
-from stt_benchmark.launcher_utils import (
-    add_optional_arg,
+from core.config import load_config
+from runners.faster_whisper import apply_overrides, build_run_config, run_faster_whisper
+from launchers.launcher_utils import (
     apply_result_root_override,
     evaluate_experiment,
+    launch_shards,
     parse_gpu_ids,
     run_single_experiment as run_configured_experiment,
     setup_launcher_logging,
     validate_gpu_launcher_args,
-    wait_for_processes,
 )
 
 
@@ -49,37 +47,18 @@ def parse_args() -> argparse.Namespace:
 
 
 def launch_experiment(config_path: Path, experiment_name: str, gpu_ids: list[int], args: argparse.Namespace) -> None:
-    processes = []
-    for shard_index, gpu_id in enumerate(gpu_ids):
-        command = [
-            sys.executable,
-            "scripts/run_faster_whisper.py",
-            "--config",
-            str(config_path),
-            "--experiment",
-            experiment_name,
-            "--num_shards",
-            str(len(gpu_ids)),
-            "--shard_index",
-            str(shard_index),
-            "--device",
-            "cuda",
-            "--worker",
-        ]
-        add_optional_arg(command, "device_index", gpu_id)
-        add_optional_arg(command, "manifest_path", args.manifest_path)
-        add_optional_arg(command, "result_root", args.result_root)
-        add_optional_arg(command, "model", args.model)
-        add_optional_arg(command, "beam_size", args.beam_size)
-        add_optional_arg(command, "compute_type", args.compute_type)
-        add_optional_arg(command, "language", args.language)
-        add_optional_arg(command, "limit", args.limit)
-        if args.no_resume:
-            command.append("--no_resume")
-        LOGGER.info("Launching shard %s on cuda device_index=%s for %s", shard_index, gpu_id, experiment_name)
-        processes.append((shard_index, subprocess.Popen(command, cwd=PROJECT_ROOT)))
-
-    wait_for_processes(processes, experiment_name)
+    launch_shards(
+        script_name="scripts/run_faster_whisper.py",
+        config_path=config_path,
+        experiment_name=experiment_name,
+        worker_ids=gpu_ids,
+        args=args,
+        logger=LOGGER,
+        project_root=PROJECT_ROOT,
+        worker_options=lambda _shard_index, gpu_id: ["--device", "cuda", "--device_index", str(gpu_id)],
+        optional_arg_names=["manifest_path", "result_root", "model", "beam_size", "compute_type", "language", "limit"],
+        flag_names=["no_resume"],
+    )
 
 
 def launch_all_experiments(args: argparse.Namespace) -> None:

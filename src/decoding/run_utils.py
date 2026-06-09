@@ -3,10 +3,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from stt_benchmark.config import output_paths
-from stt_benchmark.io import read_jsonl
-from stt_benchmark.sharding import select_shard
-from stt_benchmark.text import normalize_text
+from core.config import output_paths
+from core.io import read_jsonl
+from core.sharding import select_shard
+from core.text import normalize_text
 
 
 @dataclass

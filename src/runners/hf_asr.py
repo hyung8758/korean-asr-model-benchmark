@@ -5,10 +5,10 @@ from typing import Any
 
 from tqdm import tqdm
 
-from stt_benchmark.config import experiment_name, result_dir_for
-from stt_benchmark.io import append_jsonl, write_json
-from stt_benchmark.openai_whisper_runner import validate_cuda_device
-from stt_benchmark.runner_utils import (
+from core.cuda import validate_cuda_device
+from core.config import experiment_name, result_dir_for
+from core.io import append_jsonl, write_json
+from decoding.run_utils import (
     fail_if_all_samples_failed,
     finish_run,
     make_error_row,

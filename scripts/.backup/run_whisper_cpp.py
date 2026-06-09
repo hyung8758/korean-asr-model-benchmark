@@ -8,8 +8,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from stt_benchmark.config import find_experiment, load_config
-from stt_benchmark.launcher_utils import (
+from core.config import find_experiment, load_config
+from launchers.launcher_utils import (
     add_optional_arg,
     apply_result_root_override,
     evaluate_experiment,
@@ -20,7 +20,7 @@ from stt_benchmark.launcher_utils import (
     validate_gpu_launcher_args,
     wait_for_processes,
 )
-from stt_benchmark.whisper_cpp_runner import apply_overrides, build_run_config, run_whisper_cpp, validate_runtime
+from runners.whisper_cpp import apply_overrides, build_run_config, run_whisper_cpp, validate_runtime
 
 
 LOGGER = logging.getLogger("whisper_cpp_launcher")

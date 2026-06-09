@@ -22,7 +22,7 @@ import torch
 import torchaudio
 from tqdm import tqdm
 
-from stt_benchmark.text import normalize_text
+from core.text import normalize_text
 
 LOGGER = logging.getLogger("prepare_whisper_benchmark_data")
 AUDIO_SUFFIXES = {".wav", ".flac"}

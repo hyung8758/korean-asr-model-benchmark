@@ -4,8 +4,8 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from stt_benchmark.config import find_experiment, load_config, result_dir_for
-from stt_benchmark.logging_utils import setup_logging
+from core.config import find_experiment, load_config, result_dir_for
+from core.logging_utils import setup_logging
 
 
 def parse_gpu_ids(args, config: dict[str, Any]) -> list[int]:
@@ -63,6 +63,53 @@ def run_single_experiment(
 def add_optional_arg(command: list[str], name: str, value) -> None:
     if value is not None:
         command.extend([f"--{name}", str(value)])
+
+
+def add_optional_args(command: list[str], args, names: list[str]) -> None:
+    for name in names:
+        add_optional_arg(command, name, getattr(args, name, None))
+
+
+def add_flags(command: list[str], args, names: list[str]) -> None:
+    for name in names:
+        if getattr(args, name, False):
+            command.append(f"--{name}")
+
+
+def launch_shards(
+    script_name: str,
+    config_path: Path,
+    experiment_name: str,
+    worker_ids: list[int],
+    args,
+    logger: logging.Logger,
+    project_root: Path,
+    worker_options: Callable[[int, int], list[str]],
+    optional_arg_names: list[str],
+    flag_names: list[str],
+) -> None:
+    processes = []
+    for shard_index, worker_id in enumerate(worker_ids):
+        command = [
+            sys.executable,
+            script_name,
+            "--config",
+            str(config_path),
+            "--experiment",
+            experiment_name,
+            "--num_shards",
+            str(len(worker_ids)),
+            "--shard_index",
+            str(shard_index),
+            "--worker",
+            *worker_options(shard_index, worker_id),
+        ]
+        add_optional_args(command, args, optional_arg_names)
+        add_flags(command, args, flag_names)
+        logger.info("Launching shard %s on worker=%s for %s", shard_index, worker_id, experiment_name)
+        processes.append((shard_index, subprocess.Popen(command, cwd=project_root)))
+
+    wait_for_processes(processes, experiment_name)
 
 
 def run_logged_command(command: list[str], logger: logging.Logger, project_root: Path) -> None:

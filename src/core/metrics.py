@@ -2,8 +2,8 @@ from collections import defaultdict
 from statistics import mean, median
 from typing import Any
 
-from stt_benchmark.io import read_jsonl, write_json, write_jsonl
-from stt_benchmark.text import char_tokens, word_tokens
+from core.io import read_jsonl, write_json, write_jsonl
+from core.text import char_tokens, word_tokens
 
 
 BUCKETS = ("short", "mid", "long")

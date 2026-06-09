@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Any
 
-from stt_benchmark.io import read_json
+from core.io import read_json
 
 
 DEFAULT_CONFIG = {

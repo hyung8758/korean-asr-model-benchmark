@@ -6,8 +6,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from stt_benchmark.logging_utils import setup_logging
-from stt_benchmark.metrics import evaluate_result_dir
+from core.logging_utils import setup_logging
+from core.metrics import evaluate_result_dir
 
 
 def parse_args() -> argparse.Namespace:

@@ -1,6 +1,5 @@
 import argparse
 import logging
-import subprocess
 import sys
 from pathlib import Path
 
@@ -8,20 +7,19 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from stt_benchmark.config import load_config
-from stt_benchmark.hf_asr_runner import apply_overrides, build_run_config, run_hf_asr
-from stt_benchmark.io import read_jsonl, write_jsonl
-from stt_benchmark.launcher_utils import (
-    add_optional_arg,
+from core.cuda import validate_cuda_devices
+from core.config import load_config
+from runners.hf_asr import apply_overrides, build_run_config, run_hf_asr
+from core.io import read_jsonl, write_jsonl
+from launchers.launcher_utils import (
     apply_result_root_override,
     evaluate_experiment,
+    launch_shards,
     parse_gpu_ids,
     run_single_experiment as run_configured_experiment,
     setup_launcher_logging,
     validate_gpu_launcher_args,
-    wait_for_processes,
 )
-from stt_benchmark.openai_whisper_runner import validate_cuda_devices
 
 
 LOGGER = logging.getLogger("hf_asr_launcher")
@@ -85,38 +83,18 @@ def ensure_manifest(config: dict) -> None:
 
 
 def launch_experiment(config_path: Path, experiment_name: str, gpu_ids: list[int], args: argparse.Namespace) -> None:
-    processes = []
-    for shard_index, gpu_id in enumerate(gpu_ids):
-        command = [
-            sys.executable,
-            "scripts/run_hf_asr_models.py",
-            "--config",
-            str(config_path),
-            "--experiment",
-            experiment_name,
-            "--num_shards",
-            str(len(gpu_ids)),
-            "--shard_index",
-            str(shard_index),
-            "--device",
-            f"cuda:{gpu_id}",
-            "--worker",
-        ]
-        add_optional_arg(command, "manifest_path", args.manifest_path)
-        add_optional_arg(command, "result_root", args.result_root)
-        add_optional_arg(command, "model", args.model)
-        add_optional_arg(command, "beam_size", args.beam_size)
-        add_optional_arg(command, "precision", args.precision)
-        add_optional_arg(command, "language", args.language)
-        add_optional_arg(command, "limit", args.limit)
-        if args.no_resume:
-            command.append("--no_resume")
-        if args.retry_errors:
-            command.append("--retry_errors")
-        LOGGER.info("Launching shard %s on cuda:%s for %s", shard_index, gpu_id, experiment_name)
-        processes.append((shard_index, subprocess.Popen(command, cwd=PROJECT_ROOT)))
-
-    wait_for_processes(processes, experiment_name)
+    launch_shards(
+        script_name="scripts/run_hf_asr_models.py",
+        config_path=config_path,
+        experiment_name=experiment_name,
+        worker_ids=gpu_ids,
+        args=args,
+        logger=LOGGER,
+        project_root=PROJECT_ROOT,
+        worker_options=lambda _shard_index, gpu_id: ["--device", f"cuda:{gpu_id}"],
+        optional_arg_names=["manifest_path", "result_root", "model", "beam_size", "precision", "language", "limit"],
+        flag_names=["no_resume", "retry_errors"],
+    )
 
 
 def launch_all_experiments(args: argparse.Namespace) -> None:

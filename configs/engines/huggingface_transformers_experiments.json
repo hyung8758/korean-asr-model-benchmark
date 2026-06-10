@@ -1,6 +1,6 @@
 {
-  "engine": "hf_asr",
-  "manifest_path": "benchmark_data/hf_asr_combined_manifest.jsonl",
+  "engine": "huggingface_transformers",
+  "manifest_path": "benchmark_data/huggingface_transformers_combined_manifest.jsonl",
   "manifest_paths": [
     "benchmark_data/manifest.jsonl"
   ],
@@ -16,16 +16,12 @@
     "beam_size": 1,
     "batch_size": 1,
     "chunk_length_s": 30,
-    "return_timestamps": false,
-    "qwen_language": "Korean",
-    "max_inference_batch_size": 1,
-    "max_new_tokens": 256
+    "return_timestamps": false
   },
   "experiments": [
     {
       "name": "crisperwhisper_beam1_float16",
       "model": "nyrahealth/CrisperWhisper",
-      "runner": "transformers_whisper",
       "beam_size": 1,
       "precision": "float16",
       "return_timestamps": false
@@ -33,20 +29,9 @@
     {
       "name": "ghost613_whisper_large_v3_turbo_korean_beam1_float16",
       "model": "ghost613/whisper-large-v3-turbo-korean",
-      "runner": "transformers_whisper",
       "beam_size": 1,
       "precision": "float16",
       "return_timestamps": false
-    },
-    {
-      "name": "qwen3_asr_1_7b_bfloat16",
-      "model": "Qwen/Qwen3-ASR-1.7B",
-      "runner": "qwen_asr",
-      "beam_size": 1,
-      "precision": "bfloat16",
-      "qwen_language": "Korean",
-      "return_timestamps": false,
-      "max_new_tokens": 256
     }
   ]
 }

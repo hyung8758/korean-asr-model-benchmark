@@ -1,0 +1,32 @@
+{
+  "engine": "qwen_speech_recognition",
+  "manifest_path": "benchmark_data/qwen_speech_recognition_combined_manifest.jsonl",
+  "manifest_paths": [
+    "benchmark_data/manifest.jsonl"
+  ],
+  "result_root": "results",
+  "language": "ko",
+  "device": "cuda:0",
+  "launcher": {
+    "gpu_ids": [0, 1, 2, 3, 4, 5],
+    "evaluate_after_decode": true
+  },
+  "decode_defaults": {
+    "beam_size": 1,
+    "return_timestamps": false,
+    "qwen_language": "Korean",
+    "max_inference_batch_size": 1,
+    "max_new_tokens": 256
+  },
+  "experiments": [
+    {
+      "name": "qwen3_speech_recognition_1_7b_bfloat16",
+      "model": "Qwen/Qwen3-ASR-1.7B",
+      "beam_size": 1,
+      "precision": "bfloat16",
+      "qwen_language": "Korean",
+      "return_timestamps": false,
+      "max_new_tokens": 256
+    }
+  ]
+}

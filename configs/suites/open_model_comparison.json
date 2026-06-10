@@ -1,0 +1,18 @@
+{
+  "name": "open_model_comparison",
+  "description": "같은 한국어 벤치마크 manifest로 추가 공개 STT 모델을 비교한다.",
+  "experiments": [
+    {
+      "name": "huggingface_transformers_all",
+      "engine": "huggingface_transformers",
+      "script": "scripts/run_huggingface_transformers.py",
+      "config": "configs/engines/huggingface_transformers_experiments.json"
+    },
+    {
+      "name": "qwen_speech_recognition_all",
+      "engine": "qwen_speech_recognition",
+      "script": "scripts/run_qwen_speech_recognition.py",
+      "config": "configs/engines/qwen_speech_recognition_experiments.json"
+    }
+  ]
+}

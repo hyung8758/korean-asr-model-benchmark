@@ -1,0 +1,36 @@
+{
+  "name": "full_benchmark",
+  "description": "관리 중인 모든 벤치마크 runner를 같은 한국어 manifest로 실행한다.",
+  "experiments": [
+    {
+      "name": "openai_whisper_all",
+      "engine": "openai_whisper",
+      "script": "scripts/run_openai_whisper_baseline.py",
+      "config": "configs/engines/openai_whisper_experiments.json"
+    },
+    {
+      "name": "faster_whisper_all",
+      "engine": "faster_whisper",
+      "script": "scripts/run_faster_whisper.py",
+      "config": "configs/engines/faster_whisper_experiments.json"
+    },
+    {
+      "name": "whisper_cpp_server_all",
+      "engine": "whisper_cpp_server",
+      "script": "scripts/run_whisper_cpp_server.py",
+      "config": "configs/engines/whisper_cpp_server_experiments.json"
+    },
+    {
+      "name": "huggingface_transformers_all",
+      "engine": "huggingface_transformers",
+      "script": "scripts/run_huggingface_transformers.py",
+      "config": "configs/engines/huggingface_transformers_experiments.json"
+    },
+    {
+      "name": "qwen_speech_recognition_all",
+      "engine": "qwen_speech_recognition",
+      "script": "scripts/run_qwen_speech_recognition.py",
+      "config": "configs/engines/qwen_speech_recognition_experiments.json"
+    }
+  ]
+}

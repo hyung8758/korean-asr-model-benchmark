@@ -1,8 +1,8 @@
-# Experiment Results
+# 실험 결과
 
-이 문서는 한국어 utterance benchmark에서 OpenAI Whisper, faster-whisper, whisper.cpp를 비교한 주요 결과를 정리한다.
+이 문서는 한국어 utterance 벤치마크에서 OpenAI Whisper, faster-whisper, whisper.cpp를 비교한 주요 결과를 정리한다.
 
-## Test Data
+## 평가 데이터
 
 - 낭독체: Zeroth Korean
 - 강연/발표체: Pansori-TEDxKR
@@ -75,7 +75,7 @@
 - OpenAI Whisper/faster-whisper와 비교했을 때 whisper.cpp large-v3는 CER가 약 1%p 정도 낮았다.
 - 특히 insertion이 크게 줄어드는 경향이 있었다. 예를 들어 faster-whisper large-v3 계열보다 insertion 비율이 낮게 나타났다.
 
-## Large-v3 Engine Comparison
+## Large-v3 엔진 비교
 
 | experiment | CER | WER | avg RTF |
 | --- | ---: | ---: | ---: |
@@ -93,7 +93,7 @@
 - whisper.cpp의 성능 우위가 quantization 때문인지 확인하기 위해 non-quantized/f16 모델도 확인했지만, faster-whisper 대비 성능 우위가 유지되었다.
 - beam size는 항상 클수록 좋은 방향으로 작동하지 않았다. 특히 큰 모델에서는 beam1이 더 안정적인 경우가 있었다.
 
-## Dataset-Level Error Pattern
+## 데이터셋별 오류 패턴
 
 - 모델이 커질수록 substitution은 감소하는 경향이 있었다.
 - insertion과 deletion은 모델 크기 증가만으로 크게 줄지는 않았다.
@@ -102,7 +102,7 @@
 - TEDxKR에서는 전체 CER는 낮지만 고유 표현이나 드문 단어에서 음운적으로 비슷한 단어로 치환되는 substitution이 보였다.
 - ASR-KCSC 대화체에서는 filler, 반복, 조사, 구어체 표현을 줄이거나 문장을 정리해서 출력하는 경향이 있었다.
 
-## Whisper Engine Issues
+## Whisper 엔진 문제점
 
 한국어를 강제했음에도 일부 엔진에서 영어를 제외한 외국어 출력이 발생했다.
 
@@ -111,17 +111,16 @@
 | OpenAI Whisper | 32 / 6500, 0.49% | 25 / 3500, 0.71% | 7 / 3000, 0.23% |
 | faster-whisper | 32 / 6500, 0.49% | 25 / 3500, 0.71% | 7 / 3000, 0.23% |
 | whisper.cpp | 46 / 6500, 0.71% | 34 / 3500, 0.97% | 12 / 3000, 0.40% |
-| Qwen3-ASR | 6 / 6500, 0.09% | 4 / 3500, 0.11% | 2 / 3000, 0.07% |
+| Qwen3 Speech Recognition | 6 / 6500, 0.09% | 4 / 3500, 0.11% | 2 / 3000, 0.07% |
 | ghost613 Korean Whisper | 0 / 6500, 0.00% | 0 / 3500, 0.00% | 0 / 3000, 0.00% |
 | CrisperWhisper | 10 / 6500, 0.15% | 3 / 3500, 0.09% | 7 / 3000, 0.23% |
 
 빈 출력, 비정상적으로 길거나 짧은 출력, 반복 패턴, 자막 제공류 문구도 관찰되었다. 비정상적인 길이는 reference 길이를 기준으로 판단했다.
 
-| pattern | OpenAI | faster | whisper.cpp | Qwen3-ASR | ghost613 | CrisperWhisper |
+| pattern | OpenAI | faster | whisper.cpp | Qwen3 Speech Recognition | ghost613 | CrisperWhisper |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | 빈 출력 | 62, 0.95% | 61, 0.94% | 59, 0.91% | 1, 0.02% | 0, 0.00% | 20, 0.31% |
 | 긴 출력 | 16, 0.25% | 16, 0.25% | 0, 0.00% | 0, 0.00% | 182, 2.80% | 67, 1.03% |
 | 짧은 출력 | 10, 0.15% | 9, 0.14% | 5, 0.08% | 0, 0.00% | 21, 0.32% | 47, 0.72% |
 | 반복 패턴 | 17, 0.26% | 17, 0.26% | 28, 0.43% | 11, 0.17% | 132, 2.03% | 164, 2.52% |
 | "자막 제공"류 문구 | 11, 0.17% | 11, 0.17% | 0, 0.00% | 0, 0.00% | 0, 0.00% | 0, 0.00% |
-

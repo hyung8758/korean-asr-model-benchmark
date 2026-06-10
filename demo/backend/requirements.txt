@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+gunicorn
+python-multipart
+requests
+torch
+torchaudio
+openai-whisper
+faster-whisper
+transformers
+accelerate
+qwen-asr

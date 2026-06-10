@@ -167,10 +167,26 @@ def start_server(config: dict[str, Any], log_path: Path) -> subprocess.Popen:
     command = server_command(config)
     LOGGER.info("Starting whisper-server: %s", " ".join(command))
     log_file = log_path.open("a", encoding="utf-8")
-    process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT)
+    process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, env=whisper_cpp_env(config))
     process._stt_log_file = log_file
     wait_for_server(config, process)
     return process
+
+
+def whisper_cpp_env(config: dict[str, Any]) -> dict[str, str]:
+    env = os.environ.copy()
+    build_dir = Path(config["server_binary_path"]).resolve().parents[1]
+    library_dirs = [
+        build_dir / "src",
+        build_dir / "ggml" / "src",
+        build_dir / "ggml" / "src" / "ggml-cuda",
+    ]
+    existing = env.get("LD_LIBRARY_PATH", "")
+    values = [str(path) for path in library_dirs if path.exists()]
+    if existing:
+        values.append(existing)
+    env["LD_LIBRARY_PATH"] = ":".join(values)
+    return env
 
 
 def stop_server(process: subprocess.Popen | None) -> None:

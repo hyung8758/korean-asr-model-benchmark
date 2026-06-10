@@ -9,25 +9,25 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from core.cuda import validate_cuda_devices
 from core.config import load_config
-from runners.hf_asr import apply_overrides, build_run_config, run_hf_asr
-from core.io import read_jsonl, write_jsonl
 from launchers.launcher_utils import (
     apply_result_root_override,
     evaluate_experiment,
     launch_shards,
     parse_gpu_ids,
+    prepare_merged_manifest,
     run_single_experiment as run_configured_experiment,
     setup_launcher_logging,
     validate_gpu_launcher_args,
 )
+from runners.qwen_speech_recognition import apply_overrides, build_run_config, run_qwen_speech_recognition
 
 
-LOGGER = logging.getLogger("hf_asr_launcher")
+LOGGER = logging.getLogger("qwen_speech_recognition_launcher")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Decode benchmark manifests with selected Hugging Face ASR models.")
-    parser.add_argument("--config", type=Path, default=Path("configs/hf_asr_experiments.json"))
+    parser = argparse.ArgumentParser(description="Qwen Speech Recognition 모델로 벤치마크 manifest를 디코딩한다.")
+    parser.add_argument("--config", type=Path, default=Path("configs/engines/qwen_speech_recognition_experiments.json"))
     parser.add_argument("--experiment")
     parser.add_argument("--manifest_path", type=Path)
     parser.add_argument("--result_root", type=Path)
@@ -48,43 +48,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def ensure_manifest(config: dict) -> None:
-    if config.get("manifest_paths") and not config.get("manifest_path"):
-        raise ValueError("Config with manifest_paths must also set manifest_path for the merged manifest output.")
-    manifest_paths = [Path(path) for path in config.get("manifest_paths", [])]
-    if not manifest_paths:
-        return
-
-    output_path = Path(config["manifest_path"])
-    rows = []
-    seen_ids = set()
-    duplicates = []
-    for manifest_path in manifest_paths:
-        if not manifest_path.exists():
-            LOGGER.warning("Manifest path does not exist and will be skipped: %s", manifest_path)
-            continue
-        for row in read_jsonl(manifest_path):
-            row_id = row["id"]
-            if row_id in seen_ids:
-                duplicates.append(row_id)
-                continue
-            seen_ids.add(row_id)
-            rows.append(row)
-
-    if duplicates:
-        example = ", ".join(duplicates[:5])
-        raise ValueError(f"Duplicate utterance ids found while merging manifests: {example}")
-    if not rows:
-        raise ValueError(f"No manifest rows loaded from manifest_paths={manifest_paths}")
-
-    write_jsonl(output_path, rows)
-    config["manifest_path"] = str(output_path)
-    LOGGER.info("Prepared merged manifest: %s (%s samples)", output_path, len(rows))
-
-
 def launch_experiment(config_path: Path, experiment_name: str, gpu_ids: list[int], args: argparse.Namespace) -> None:
     launch_shards(
-        script_name="scripts/run_hf_asr_models.py",
+        script_name="scripts/run_qwen_speech_recognition.py",
         config_path=config_path,
         experiment_name=experiment_name,
         worker_ids=gpu_ids,
@@ -104,7 +70,7 @@ def launch_all_experiments(args: argparse.Namespace) -> None:
     apply_result_root_override(config, args)
     setup_launcher_logging(config)
     validate_cuda_devices(gpu_ids)
-    ensure_manifest(config)
+    prepare_merged_manifest(config, LOGGER)
     LOGGER.info("Launcher mode: %s experiments, GPUs=%s", len(config["experiments"]), gpu_ids)
 
     for experiment in config["experiments"]:
@@ -119,10 +85,10 @@ def launch_all_experiments(args: argparse.Namespace) -> None:
 
 def run_worker_or_single(args: argparse.Namespace) -> None:
     config = load_config(args.config)
-    ensure_manifest(config)
+    prepare_merged_manifest(config, LOGGER)
     if args.manifest_path is None:
         args.manifest_path = Path(config["manifest_path"])
-    run_configured_experiment(args, apply_overrides, build_run_config, run_hf_asr)
+    run_configured_experiment(args, apply_overrides, build_run_config, run_qwen_speech_recognition)
 
 
 def main() -> None:

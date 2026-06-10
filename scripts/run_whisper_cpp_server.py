@@ -32,8 +32,8 @@ LOGGER = logging.getLogger("whisper_cpp_server_launcher")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Decode benchmark manifest with whisper.cpp server.")
-    parser.add_argument("--config", type=Path, default=Path("configs/whisper_cpp_server_experiments.json"))
+    parser = argparse.ArgumentParser(description="whisper.cpp server로 벤치마크 manifest를 디코딩한다.")
+    parser.add_argument("--config", type=Path, default=Path("configs/engines/whisper_cpp_server_experiments.json"))
     parser.add_argument("--experiment")
     parser.add_argument("--manifest_path", type=Path)
     parser.add_argument("--result_root", type=Path)

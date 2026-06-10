@@ -1,4 +1,4 @@
-"""Prepare a simple Whisper benchmark manifest from Korean STT corpora."""
+"""한국어 STT corpus에서 Whisper 벤치마크 manifest를 만든다."""
 
 import argparse
 import json
@@ -45,7 +45,7 @@ class Candidate:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Create Whisper benchmark wavs, manifest.jsonl, and summary.json."
+        description="Whisper 벤치마크 wav, manifest.jsonl, summary.json을 생성한다."
     )
     parser.add_argument("--data_root", type=Path, required=True)
     parser.add_argument("--output_root", type=Path, required=True)

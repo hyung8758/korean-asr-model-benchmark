@@ -14,37 +14,35 @@ from launchers.launcher_utils import (
     evaluate_experiment,
     launch_shards,
     parse_gpu_ids,
+    prepare_merged_manifest,
     run_single_experiment as run_configured_experiment,
     setup_launcher_logging,
     validate_gpu_launcher_args,
 )
-from runners.openai_whisper import (
-    apply_overrides,
-    build_run_config,
-    run_openai_whisper,
-)
+from runners.huggingface_transformers import apply_overrides, build_run_config, run_huggingface_transformers
 
 
-LOGGER = logging.getLogger("openai_whisper_launcher")
+LOGGER = logging.getLogger("huggingface_transformers_launcher")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="OpenAI Whisper로 벤치마크 manifest를 디코딩한다.")
-    parser.add_argument("--config", type=Path, default=Path("configs/engines/openai_whisper_experiments.json"))
+    parser = argparse.ArgumentParser(description="Hugging Face Transformers STT 모델로 벤치마크 manifest를 디코딩한다.")
+    parser.add_argument("--config", type=Path, default=Path("configs/engines/huggingface_transformers_experiments.json"))
     parser.add_argument("--experiment")
     parser.add_argument("--manifest_path", type=Path)
     parser.add_argument("--result_root", type=Path)
     parser.add_argument("--result_dir", type=Path)
     parser.add_argument("--model")
     parser.add_argument("--beam_size", type=int)
-    parser.add_argument("--precision", choices=("fp16", "fp32", "int8"))
+    parser.add_argument("--precision", choices=("float16", "float32", "bfloat16"))
     parser.add_argument("--device")
     parser.add_argument("--language")
     parser.add_argument("--num_shards", type=int, default=1)
     parser.add_argument("--shard_index", type=int, default=0)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--no_resume", action="store_true")
-    parser.add_argument("--gpus", default=None, help="Comma-separated GPU ids for launcher mode. Default uses config launcher.gpu_ids.")
+    parser.add_argument("--retry_errors", action="store_true")
+    parser.add_argument("--gpus", default=None, help="Comma-separated GPU ids for launcher mode.")
     parser.add_argument("--no_evaluate", action="store_true")
     parser.add_argument("--worker", action="store_true")
     return parser.parse_args()
@@ -52,7 +50,7 @@ def parse_args() -> argparse.Namespace:
 
 def launch_experiment(config_path: Path, experiment_name: str, gpu_ids: list[int], args: argparse.Namespace) -> None:
     launch_shards(
-        script_name="scripts/run_openai_whisper_baseline.py",
+        script_name="scripts/run_huggingface_transformers.py",
         config_path=config_path,
         experiment_name=experiment_name,
         worker_ids=gpu_ids,
@@ -61,7 +59,7 @@ def launch_experiment(config_path: Path, experiment_name: str, gpu_ids: list[int
         project_root=PROJECT_ROOT,
         worker_options=lambda _shard_index, gpu_id: ["--device", f"cuda:{gpu_id}"],
         optional_arg_names=["manifest_path", "result_root", "model", "beam_size", "precision", "language", "limit"],
-        flag_names=["no_resume"],
+        flag_names=["no_resume", "retry_errors"],
     )
 
 
@@ -72,6 +70,7 @@ def launch_all_experiments(args: argparse.Namespace) -> None:
     apply_result_root_override(config, args)
     setup_launcher_logging(config)
     validate_cuda_devices(gpu_ids)
+    prepare_merged_manifest(config, LOGGER)
     LOGGER.info("Launcher mode: %s experiments, GPUs=%s", len(config["experiments"]), gpu_ids)
 
     for experiment in config["experiments"]:
@@ -84,10 +83,18 @@ def launch_all_experiments(args: argparse.Namespace) -> None:
         LOGGER.info("Finished experiment: %s", experiment_name)
 
 
+def run_worker_or_single(args: argparse.Namespace) -> None:
+    config = load_config(args.config)
+    prepare_merged_manifest(config, LOGGER)
+    if args.manifest_path is None:
+        args.manifest_path = Path(config["manifest_path"])
+    run_configured_experiment(args, apply_overrides, build_run_config, run_huggingface_transformers)
+
+
 def main() -> None:
     args = parse_args()
     if args.worker or args.experiment:
-        run_configured_experiment(args, apply_overrides, build_run_config, run_openai_whisper)
+        run_worker_or_single(args)
         return
     launch_all_experiments(args)
 

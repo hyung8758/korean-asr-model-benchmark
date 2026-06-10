@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from core.config import find_experiment, load_config, result_dir_for
+from core.io import read_jsonl, write_jsonl
 from core.logging_utils import setup_logging
 
 
@@ -41,6 +42,41 @@ def apply_result_root_override(config: dict[str, Any], args) -> None:
 
 def setup_launcher_logging(config: dict[str, Any]) -> None:
     setup_logging(Path(config.get("result_root", "results")) / config["engine"] / "_launcher" / "logs" / "launcher.log")
+
+
+def prepare_merged_manifest(config: dict[str, Any], logger: logging.Logger) -> None:
+    if config.get("manifest_paths") and not config.get("manifest_path"):
+        raise ValueError("Config with manifest_paths must also set manifest_path for the merged manifest output.")
+
+    manifest_paths = [Path(path) for path in config.get("manifest_paths", [])]
+    if not manifest_paths:
+        return
+
+    output_path = Path(config["manifest_path"])
+    rows = []
+    seen_ids = set()
+    duplicates = []
+    for manifest_path in manifest_paths:
+        if not manifest_path.exists():
+            logger.warning("Manifest path does not exist and will be skipped: %s", manifest_path)
+            continue
+        for row in read_jsonl(manifest_path):
+            row_id = row["id"]
+            if row_id in seen_ids:
+                duplicates.append(row_id)
+                continue
+            seen_ids.add(row_id)
+            rows.append(row)
+
+    if duplicates:
+        example = ", ".join(duplicates[:5])
+        raise ValueError(f"Duplicate utterance ids found while merging manifests: {example}")
+    if not rows:
+        raise ValueError(f"No manifest rows loaded from manifest_paths={manifest_paths}")
+
+    write_jsonl(output_path, rows)
+    config["manifest_path"] = str(output_path)
+    logger.info("Prepared merged manifest: %s (%s samples)", output_path, len(rows))
 
 
 def run_single_experiment(

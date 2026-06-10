@@ -1,18 +1,14 @@
 import logging
-import time
 from pathlib import Path
 from typing import Any
 
-from tqdm import tqdm
-
 from core.cuda import validate_cuda_device
 from core.config import experiment_name, result_dir_for
-from core.io import append_jsonl, write_json
+from core.io import write_json
+from decoding.decode_loop import DecodeOutput, decode_rows
 from decoding.run_utils import (
     fail_if_all_samples_failed,
     finish_run,
-    make_error_row,
-    make_prediction_row,
     prepare_decode_run,
 )
 
@@ -80,53 +76,6 @@ def format_segments(result: dict[str, Any]) -> list[dict[str, Any]]:
     return segments
 
 
-def decode_rows(
-    rows: list[dict[str, Any]],
-    model,
-    config: dict[str, Any],
-    prediction_path: Path,
-    error_path: Path,
-    done_ids: set[str],
-    limit: int | None,
-) -> tuple[int, int]:
-    prediction_path.parent.mkdir(parents=True, exist_ok=True)
-    error_path.parent.mkdir(parents=True, exist_ok=True)
-    decoded_count = 0
-    error_count = 0
-
-    with prediction_path.open("a", encoding="utf-8") as prediction_file, error_path.open(
-        "a", encoding="utf-8"
-    ) as error_file:
-        for item in tqdm(rows, desc="Decoding"):
-            if item["id"] in done_ids:
-                continue
-            if limit is not None and decoded_count + error_count >= limit:
-                break
-
-            start = time.perf_counter()
-            try:
-                result = model.transcribe(item["audio"], **config["decode_options"])
-                decode_time = time.perf_counter() - start
-                append_jsonl(
-                    prediction_file,
-                    make_prediction_row(
-                        item=item,
-                        prediction_raw=result.get("text", "").strip(),
-                        segments=format_segments(result),
-                        decode_time=decode_time,
-                        config=config,
-                    ),
-                )
-                decoded_count += 1
-            except Exception as exc:
-                decode_time = time.perf_counter() - start
-                append_jsonl(error_file, make_error_row(item, "decode_failed", str(exc), decode_time, config))
-                LOGGER.exception("Decode failed for id=%s", item["id"])
-                error_count += 1
-
-    return decoded_count, error_count
-
-
 def run_openai_whisper(config: dict[str, Any], args) -> None:
     import torch
     import whisper
@@ -144,14 +93,22 @@ def run_openai_whisper(config: dict[str, Any], args) -> None:
     if str(config["device"]).startswith("cuda"):
         torch.cuda.reset_peak_memory_stats(config["device"])
 
+    def decode_one(item: dict[str, Any]) -> DecodeOutput:
+        result = model.transcribe(item["audio"], **config["decode_options"])
+        return DecodeOutput(
+            prediction_raw=result.get("text", "").strip(),
+            segments=format_segments(result),
+        )
+
     decoded_count, error_count = decode_rows(
         rows=decode_run.rows,
-        model=model,
         config=config,
         prediction_path=decode_run.prediction_path,
         error_path=decode_run.error_path,
         done_ids=decode_run.done_ids,
         limit=args.limit,
+        decode_one=decode_one,
+        logger=LOGGER,
     )
 
     finish_run(decode_run.run_config, decoded_count, error_count)

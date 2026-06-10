@@ -1,17 +1,13 @@
 import logging
-import time
 from pathlib import Path
 from typing import Any
 
-from tqdm import tqdm
-
 from core.config import experiment_name, result_dir_for
-from core.io import append_jsonl, write_json
+from core.io import write_json
+from decoding.decode_loop import DecodeOutput, decode_rows
 from decoding.run_utils import (
     fail_if_all_samples_failed,
     finish_run,
-    make_error_row,
-    make_prediction_row,
     prepare_decode_run,
 )
 
@@ -112,48 +108,6 @@ def format_segments(segments) -> tuple[str, list[dict[str, Any]]]:
     return " ".join(texts).strip(), rows
 
 
-def decode_rows(
-    rows: list[dict[str, Any]],
-    model: Any,
-    config: dict[str, Any],
-    prediction_path: Path,
-    error_path: Path,
-    done_ids: set[str],
-    limit: int | None,
-) -> tuple[int, int]:
-    prediction_path.parent.mkdir(parents=True, exist_ok=True)
-    error_path.parent.mkdir(parents=True, exist_ok=True)
-    decoded_count = 0
-    error_count = 0
-
-    with prediction_path.open("a", encoding="utf-8") as prediction_file, error_path.open(
-        "a", encoding="utf-8"
-    ) as error_file:
-        for item in tqdm(rows, desc="Decoding"):
-            if item["id"] in done_ids:
-                continue
-            if limit is not None and decoded_count + error_count >= limit:
-                break
-
-            start = time.perf_counter()
-            try:
-                segment_generator, _info = model.transcribe(item["audio"], **config["transcribe_options"])
-                prediction_raw, segments = format_segments(segment_generator)
-                decode_time = time.perf_counter() - start
-                append_jsonl(
-                    prediction_file,
-                    make_prediction_row(item, prediction_raw, segments, decode_time, config),
-                )
-                decoded_count += 1
-            except Exception as exc:
-                decode_time = time.perf_counter() - start
-                append_jsonl(error_file, make_error_row(item, "decode_failed", str(exc), decode_time, config))
-                LOGGER.exception("Decode failed for id=%s", item["id"])
-                error_count += 1
-
-    return decoded_count, error_count
-
-
 def run_faster_whisper(config: dict[str, Any], args) -> None:
     from faster_whisper import WhisperModel
 
@@ -177,14 +131,20 @@ def run_faster_whisper(config: dict[str, Any], args) -> None:
         compute_type=config["compute_type"],
     )
 
+    def decode_one(item: dict[str, Any]) -> DecodeOutput:
+        segment_generator, _info = model.transcribe(item["audio"], **config["transcribe_options"])
+        prediction_raw, segments = format_segments(segment_generator)
+        return DecodeOutput(prediction_raw=prediction_raw, segments=segments)
+
     decoded_count, error_count = decode_rows(
         rows=decode_run.rows,
-        model=model,
         config=config,
         prediction_path=decode_run.prediction_path,
         error_path=decode_run.error_path,
         done_ids=decode_run.done_ids,
         limit=args.limit,
+        decode_one=decode_one,
+        logger=LOGGER,
     )
 
     finish_run(decode_run.run_config, decoded_count, error_count)

@@ -24,8 +24,8 @@ LOGGER = logging.getLogger("faster_whisper_launcher")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Decode benchmark manifest with faster-whisper.")
-    parser.add_argument("--config", type=Path, default=Path("configs/faster_whisper_experiments.json"))
+    parser = argparse.ArgumentParser(description="faster-whisper로 벤치마크 manifest를 디코딩한다.")
+    parser.add_argument("--config", type=Path, default=Path("configs/engines/faster_whisper_experiments.json"))
     parser.add_argument("--experiment")
     parser.add_argument("--manifest_path", type=Path)
     parser.add_argument("--result_root", type=Path)

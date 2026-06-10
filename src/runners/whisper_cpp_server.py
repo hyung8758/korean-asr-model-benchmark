@@ -225,7 +225,7 @@ def warmup_server(config: dict[str, Any], rows: list[dict[str, Any]]) -> None:
         transcribe(server_url, rows[0]["audio"], request_fields(config), config.get("request_timeout_seconds"))
         LOGGER.info("Warmup finished with id=%s", rows[0]["id"])
     except Exception:
-        LOGGER.exception("Warmup failed; continuing benchmark decode")
+        LOGGER.exception("Warmup failed; 벤치마크 디코딩을 계속합니다")
 
 
 def decode_rows(

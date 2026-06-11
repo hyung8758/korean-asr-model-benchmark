@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -21,6 +22,16 @@ from app.schemas import EngineInfo, EngineStatus, TranscriptionResponse
 from app.vad import VadSegment, create_vad
 
 
+class AccessLogPathFilter(logging.Filter):
+    def __init__(self, hidden_paths: set[str]):
+        super().__init__()
+        self.hidden_paths = hidden_paths
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        return not any(f" {path} " in message for path in self.hidden_paths)
+
+
 app = FastAPI(title="한국어 STT 데모 서버")
 DEFAULT_RUN_DIR = Path("logs") / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_log"
 RUN_DIR = Path(os.getenv("DEMO_RUN_DIR", str(DEFAULT_RUN_DIR)))
@@ -31,21 +42,34 @@ MODEL_LOG_PATH = LOG_DIR / "model_events.jsonl"
 LOG_LOCK = threading.Lock()
 DEFAULTS = DEMO_CONFIG["defaults"]
 SERVER_CONFIG = DEMO_CONFIG["server"]
+SECURITY_CONFIG = SERVER_CONFIG.get("security", {})
 STREAMING_CONFIG = DEMO_CONFIG["streaming"]
 VAD_CONFIG = DEMO_CONFIG["vad"]
 DEFAULT_LANGUAGE = str(DEFAULTS["language"])
 DEFAULT_BEAM_SIZE = int(DEFAULTS["beam_size"])
 DEFAULT_TEMPERATURE = float(DEFAULTS["temperature"])
+MAX_UPLOAD_BYTES = int(SECURITY_CONFIG.get("max_upload_mb", 100)) * 1024 * 1024
+MAX_AUDIO_DURATION_SECONDS = float(SECURITY_CONFIG.get("max_audio_duration_seconds", 1200))
+MAX_ACTIVE_SESSIONS = max(1, int(SECURITY_CONFIG.get("max_active_sessions", 1)))
 STREAM_PARTIAL_INTERVAL_SECONDS = float(
     os.getenv("DEMO_STREAM_PARTIAL_INTERVAL_SECONDS", STREAMING_CONFIG["partial_interval_seconds"])
 )
+SESSION_SEMAPHORE = asyncio.Semaphore(MAX_ACTIVE_SESSIONS)
+SESSION_LIMIT_LOCK = asyncio.Lock()
 
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
+hidden_access_log_paths = set(SECURITY_CONFIG.get("hide_access_log_paths", []))
+if hidden_access_log_paths:
+    access_log_filter = AccessLogPathFilter(hidden_access_log_paths)
+    logging.getLogger("uvicorn.access").addFilter(access_log_filter)
+    logging.getLogger("gunicorn.access").addFilter(access_log_filter)
+
+cors_origins = SECURITY_CONFIG.get("cors_origins") or []
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -62,9 +86,7 @@ def root(request: Request) -> RedirectResponse:
 
 
 def response_payload(response: TranscriptionResponse) -> dict:
-    if hasattr(response, "model_dump"):
-        return response.model_dump()
-    return response.dict()
+    return response.model_dump()
 
 
 def utc_now() -> str:
@@ -102,6 +124,32 @@ def parse_engine_ids(engine_ids: str) -> list[str]:
     if not values:
         raise ValueError("최소 하나 이상의 engine_id가 필요합니다.")
     return values
+
+
+def audio_seconds_from_frames(frames: bytes, settings: tuple[int, int, int]) -> float:
+    channels, sample_width, sample_rate = settings
+    frame_size = channels * sample_width
+    if frame_size <= 0 or sample_rate <= 0:
+        return 0.0
+    return (len(frames) / frame_size) / sample_rate
+
+
+def validate_upload_size(data: bytes) -> None:
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"업로드 파일이 너무 큽니다. 최대 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB까지 허용합니다.")
+
+
+def validate_audio_duration(duration: float | None) -> None:
+    if duration is not None and duration > MAX_AUDIO_DURATION_SECONDS:
+        raise HTTPException(status_code=413, detail=f"음성이 너무 깁니다. 최대 {int(MAX_AUDIO_DURATION_SECONDS)}초까지 허용합니다.")
+
+
+async def try_acquire_session() -> bool:
+    async with SESSION_LIMIT_LOCK:
+        if SESSION_SEMAPHORE.locked():
+            return False
+        await SESSION_SEMAPHORE.acquire()
+        return True
 
 
 async def send_status_event(
@@ -297,11 +345,16 @@ async def transcribe(
     beam_size: int = Form(DEFAULT_BEAM_SIZE),
     temperature: float = Form(DEFAULT_TEMPERATURE),
 ) -> TranscriptionResponse:
+    if not await try_acquire_session():
+        raise HTTPException(status_code=429, detail="다른 인식 작업이 진행 중입니다. 잠시 후 다시 시도하세요.")
     request_id = uuid.uuid4().hex
     suffix = Path(file.filename or "audio.wav").suffix or ".wav"
-    audio_path = save_upload(await file.read(), suffix)
-    saved_audio_path = save_audio_copy(audio_path, request_id, engine_id, "offline")
     try:
+        data = await file.read()
+        validate_upload_size(data)
+        audio_path = save_upload(data, suffix)
+        validate_audio_duration(wav_duration(audio_path))
+        saved_audio_path = save_audio_copy(audio_path, request_id, engine_id, "offline")
         return await decode_file(
             audio_path=audio_path,
             engine_id=engine_id,
@@ -312,6 +365,8 @@ async def transcribe(
             request_id=request_id,
             saved_audio_path=saved_audio_path,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         write_event(
             EVENT_LOG_PATH,
@@ -320,14 +375,16 @@ async def transcribe(
                 "request_id": request_id,
                 "engine_id": engine_id,
                 "mode": "offline",
-                "saved_audio_path": str(saved_audio_path),
+                "saved_audio_path": str(saved_audio_path) if "saved_audio_path" in locals() else None,
                 "status": "error",
                 "error": str(exc),
             },
         )
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     finally:
-        audio_path.unlink(missing_ok=True)
+        if "audio_path" in locals():
+            audio_path.unlink(missing_ok=True)
+        SESSION_SEMAPHORE.release()
 
 
 async def decode_file(
@@ -422,10 +479,16 @@ async def vad_stream(
     input_source: str = "recording",
 ) -> None:
     await websocket.accept()
+    if not await try_acquire_session():
+        await send_websocket_json(websocket, {"type": "error", "message": "다른 인식 작업이 진행 중입니다. 잠시 후 다시 시도하세요."})
+        await websocket.close(code=1013)
+        return
     request_id = uuid.uuid4().hex
     wav_settings: tuple[int, int, int] | None = None
     started_at = time.perf_counter()
     last_partial_at = 0.0
+    received_bytes = 0
+    received_audio_seconds = 0.0
 
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
@@ -471,8 +534,26 @@ async def vad_stream(
                 if "bytes" not in message:
                     continue
 
-                frames, channels, sample_width, sample_rate = read_wav_chunk(message["bytes"])
+                chunk_bytes = message["bytes"]
+                received_bytes += len(chunk_bytes)
+                if received_bytes > MAX_UPLOAD_BYTES:
+                    await send_websocket_json(
+                        websocket,
+                        {"type": "error", "message": f"업로드 파일이 너무 큽니다. 최대 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB까지 허용합니다."},
+                    )
+                    await websocket.close(code=1009)
+                    return
+
+                frames, channels, sample_width, sample_rate = read_wav_chunk(chunk_bytes)
                 wav_settings = (channels, sample_width, sample_rate)
+                received_audio_seconds += audio_seconds_from_frames(frames, wav_settings)
+                if received_audio_seconds > MAX_AUDIO_DURATION_SECONDS:
+                    await send_websocket_json(
+                        websocket,
+                        {"type": "error", "message": f"음성이 너무 깁니다. 최대 {int(MAX_AUDIO_DURATION_SECONDS)}초까지 허용합니다."},
+                    )
+                    await websocket.close(code=1009)
+                    return
                 vad.append(frames, wav_settings)
                 if not await send_status_event(websocket, target_engine_ids, "VAD 진행 중", vad_id):
                     return
@@ -529,4 +610,5 @@ async def vad_stream(
         except Exception as exc:
             await send_websocket_json(websocket, {"type": "error", "message": str(exc)})
         finally:
+            SESSION_SEMAPHORE.release()
             await asyncio.sleep(0)

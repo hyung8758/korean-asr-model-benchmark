@@ -22,6 +22,7 @@ __pycache__/
 venv/
 .DS_Store
 demo/config.yaml
+certs/
 node_modules/
 dist/
 demo/.runtime/

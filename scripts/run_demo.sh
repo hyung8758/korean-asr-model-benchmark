@@ -4,6 +4,7 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_PATH="${DEMO_CONFIG_PATH:-$PROJECT_ROOT/demo/config.yaml}"
 CONDA_ENV="${DEMO_CONDA_ENV:-korean-asr-benchmark}"
+LOCAL_MODE="${DEMO_LOCAL_MODE:-0}"
 
 demo_config_value() {
   local key="$1"
@@ -25,6 +26,11 @@ BACKEND_PORT="${DEMO_BACKEND_PORT:-$(demo_config_value server.backend_port 16000
 FRONTEND_HOST="${DEMO_FRONTEND_HOST:-$(demo_config_value server.frontend_host 0.0.0.0)}"
 FRONTEND_PORT="${DEMO_FRONTEND_PORT:-$(demo_config_value server.frontend_port 16010)}"
 GUNICORN_WORKERS="${DEMO_GUNICORN_WORKERS:-$(demo_config_value server.gunicorn_workers 1)}"
+SSL_ENABLED="${DEMO_SSL_ENABLED:-$(demo_config_value server.ssl.enabled 0)}"
+SSL_AUTO_GENERATE="${DEMO_SSL_AUTO_GENERATE:-$(demo_config_value server.ssl.auto_generate 1)}"
+SSL_CERT_FILE_VALUE="${DEMO_SSL_CERT_FILE:-$(demo_config_value server.ssl.cert_file certs/demo.crt)}"
+SSL_KEY_FILE_VALUE="${DEMO_SSL_KEY_FILE:-$(demo_config_value server.ssl.key_file certs/demo.key)}"
+SSL_HOSTS="${DEMO_SSL_HOSTS:-$(demo_config_value server.ssl.hosts auto)}"
 START_WHISPER_CPP="${DEMO_START_WHISPER_CPP:-$(demo_config_value whisper_cpp.start_server 1)}"
 WHISPER_CPP_HOST="${DEMO_WHISPER_CPP_HOST:-$(demo_config_value whisper_cpp.host 127.0.0.1)}"
 WHISPER_CPP_PORT="${DEMO_WHISPER_CPP_PORT:-$(demo_config_value whisper_cpp.port 8100)}"
@@ -34,13 +40,28 @@ WHISPER_CPP_PROCESSORS="${DEMO_WHISPER_CPP_PROCESSORS:-$(demo_config_value whisp
 WHISPER_CPP_FLASH_ATTN="${DEMO_WHISPER_CPP_FLASH_ATTN:-$(demo_config_value whisper_cpp.flash_attention 0)}"
 WHISPER_CPP_BINARY_VALUE="${DEMO_WHISPER_CPP_BINARY:-$(demo_config_value whisper_cpp.binary third_party/whisper.cpp/build/bin/whisper-server)}"
 WHISPER_CPP_MODEL_PATH_VALUE="${DEMO_WHISPER_CPP_MODEL_PATH:-$(demo_config_value whisper_cpp.model_path third_party/whisper.cpp/models/ggml-large-v3-q5_0.bin)}"
+if [[ "$LOCAL_MODE" == "1" ]]; then
+  BACKEND_HOST="127.0.0.1"
+  FRONTEND_HOST="127.0.0.1"
+  SSL_ENABLED="0"
+fi
 WHISPER_CPP_BINARY="$(resolve_project_path "$WHISPER_CPP_BINARY_VALUE")"
 WHISPER_CPP_MODEL_PATH="$(resolve_project_path "$WHISPER_CPP_MODEL_PATH_VALUE")"
+SSL_CERT_FILE="$(resolve_project_path "$SSL_CERT_FILE_VALUE")"
+SSL_KEY_FILE="$(resolve_project_path "$SSL_KEY_FILE_VALUE")"
+if [[ "$SSL_ENABLED" == "1" ]]; then
+  BACKEND_PROXY_SCHEME="https"
+else
+  BACKEND_PROXY_SCHEME="http"
+fi
+BACKEND_PROXY_TARGET="${DEMO_BACKEND_PROXY_TARGET:-$BACKEND_PROXY_SCHEME://127.0.0.1:$BACKEND_PORT}"
 RUN_ID="${DEMO_RUN_ID:-$(date +%Y%m%d_%H%M%S)_log}"
 RUN_DIR="${DEMO_RUN_DIR:-$PROJECT_ROOT/logs/$RUN_ID}"
 LOG_DIR="${DEMO_LOG_DIR:-$RUN_DIR}"
 SAVE_DIR="${DEMO_SAVE_DIR:-$RUN_DIR/saved_audio}"
-PID_DIR="${DEMO_PID_DIR:-$PROJECT_ROOT/logs/current}"
+PID_DIR="${DEMO_PID_DIR:-$PROJECT_ROOT/logs/.pid}"
+LEGACY_PID_DIR="$PROJECT_ROOT/logs/current"
+CURRENT_LOG_LINK="${DEMO_CURRENT_LOG_LINK:-$PROJECT_ROOT/logs/current_log}"
 BACKEND_PID="$PID_DIR/backend.pid"
 FRONTEND_PID="$PID_DIR/frontend.pid"
 WHISPER_CPP_PID="$PID_DIR/whisper_cpp_server.pid"
@@ -51,6 +72,10 @@ export DEMO_SAVE_DIR="$SAVE_DIR"
 export DEMO_CONFIG_PATH="$CONFIG_PATH"
 export DEMO_BACKEND_PORT="$BACKEND_PORT"
 export DEMO_FRONTEND_PORT="$FRONTEND_PORT"
+export DEMO_SSL_ENABLED="$SSL_ENABLED"
+export DEMO_SSL_CERT_FILE="$SSL_CERT_FILE"
+export DEMO_SSL_KEY_FILE="$SSL_KEY_FILE"
+export VITE_BACKEND_TARGET="$BACKEND_PROXY_TARGET"
 export DEMO_WHISPER_CPP_SERVER_URL="http://$WHISPER_CPP_HOST:$WHISPER_CPP_PORT/inference"
 
 usage() {
@@ -61,17 +86,26 @@ Default action is console.
 
 Environment variables:
   DEMO_CONDA_ENV          Default: korean-asr-benchmark
+  DEMO_LOCAL_MODE         Default: 0, set 1 for localhost HTTP mode
   DEMO_CONFIG_PATH        Default: demo/config.yaml
   DEMO_BACKEND_HOST       Default: demo config server.backend_host
   DEMO_BACKEND_PORT       Default: demo config server.backend_port
   DEMO_FRONTEND_HOST      Default: demo config server.frontend_host
   DEMO_FRONTEND_PORT      Default: demo config server.frontend_port
   DEMO_GUNICORN_WORKERS   Default: demo config server.gunicorn_workers
+  DEMO_SSL_ENABLED        Default: demo config server.ssl.enabled
+  DEMO_SSL_AUTO_GENERATE  Default: demo config server.ssl.auto_generate
+  DEMO_SSL_CERT_FILE      Default: demo config server.ssl.cert_file
+  DEMO_SSL_KEY_FILE       Default: demo config server.ssl.key_file
+  DEMO_SSL_HOSTS          Default: demo config server.ssl.hosts
+  DEMO_BACKEND_PROXY_TARGET Default: http(s)://127.0.0.1:backend_port
+  DEMO_FRONTEND_API_BASE  Default: empty, use frontend origin and Vite proxy
   DEMO_RUN_ID             Default: YYYYMMDD_HHMMSS_log
   DEMO_RUN_DIR            Default: logs/YYYYMMDD_HHMMSS_log
   DEMO_LOG_DIR            Default: DEMO_RUN_DIR
   DEMO_SAVE_DIR           Default: DEMO_RUN_DIR/saved_audio
-  DEMO_PID_DIR            Default: logs/current
+  DEMO_PID_DIR            Default: logs/.pid
+  DEMO_CURRENT_LOG_LINK   Default: logs/current_log
   DEMO_START_WHISPER_CPP  Default: demo config whisper_cpp.start_server
   DEMO_WHISPER_CPP_PORT   Default: demo config whisper_cpp.port
   DEMO_WHISPER_CPP_FLASH_ATTN Default: demo config whisper_cpp.flash_attention
@@ -80,7 +114,51 @@ EOF
 }
 
 ensure_dirs() {
-  mkdir -p "$LOG_DIR" "$SAVE_DIR" "$PID_DIR"
+  mkdir -p "$LOG_DIR" "$SAVE_DIR"
+  ensure_pid_dir
+}
+
+ensure_pid_dir() {
+  mkdir -p "$PID_DIR"
+  migrate_legacy_pid_files
+}
+
+migrate_legacy_pid_files() {
+  if [[ "$LEGACY_PID_DIR" == "$PID_DIR" || ! -d "$LEGACY_PID_DIR" ]]; then
+    return
+  fi
+
+  local name
+  for name in backend frontend whisper_cpp_server; do
+    local old_pid="$LEGACY_PID_DIR/$name.pid"
+    local new_pid="$PID_DIR/$name.pid"
+    if [[ -f "$old_pid" && ! -f "$new_pid" ]]; then
+      mv "$old_pid" "$new_pid"
+    fi
+  done
+  rmdir "$LEGACY_PID_DIR" 2>/dev/null || true
+}
+
+refresh_current_log_link() {
+  mkdir -p "$(dirname "$CURRENT_LOG_LINK")"
+  if [[ -L "$CURRENT_LOG_LINK" || ! -e "$CURRENT_LOG_LINK" ]]; then
+    ln -sfn "$LOG_DIR" "$CURRENT_LOG_LINK"
+    return
+  fi
+
+  local backup_path
+  backup_path="${CURRENT_LOG_LINK}.backup.$(date +%Y%m%d_%H%M%S)"
+  mv "$CURRENT_LOG_LINK" "$backup_path"
+  ln -sfn "$LOG_DIR" "$CURRENT_LOG_LINK"
+  echo "Moved existing current_log directory to $backup_path"
+}
+
+public_scheme() {
+  if [[ "$SSL_ENABLED" == "1" ]]; then
+    printf '%s\n' "https"
+  else
+    printf '%s\n' "http"
+  fi
 }
 
 check_command() {
@@ -113,11 +191,90 @@ activate_conda() {
 check_dependencies() {
   check_command gunicorn "pip install -r demo/backend/requirements.txt"
   check_command npm "conda install -c conda-forge nodejs -y"
+  if [[ "$SSL_ENABLED" == "1" && "$SSL_AUTO_GENERATE" == "1" ]]; then
+    check_command openssl "conda install -c conda-forge openssl -y"
+  fi
   if [[ ! -x "$PROJECT_ROOT/demo/frontend/node_modules/.bin/vite" ]]; then
     echo "vite command not found in demo/frontend/node_modules." >&2
     echo "Install hint: cd demo/frontend && npm install" >&2
     exit 1
   fi
+}
+
+detect_ssl_hosts() {
+  if [[ "$SSL_HOSTS" != "auto" ]]; then
+    printf '%s\n' "$SSL_HOSTS"
+    return
+  fi
+
+  local hosts
+  hosts="localhost 127.0.0.1"
+  if command -v hostname >/dev/null 2>&1; then
+    hosts="$hosts $(hostname -f 2>/dev/null || true) $(hostname -I 2>/dev/null || true)"
+  fi
+  printf '%s\n' "$hosts" | tr ' ' '\n' | sed '/^$/d' | sort -u | tr '\n' ' '
+}
+
+write_ssl_openssl_config() {
+  local config_file="$1"
+  local hosts="$2"
+  local dns_index=1
+  local ip_index=1
+
+  {
+    cat <<'EOF'
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+x509_extensions = v3_req
+distinguished_name = dn
+
+[dn]
+CN = korean-asr-demo
+
+[v3_req]
+subjectAltName = @alt_names
+
+[alt_names]
+EOF
+    for host in $hosts; do
+      if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        printf 'IP.%d = %s\n' "$ip_index" "$host"
+        ip_index=$((ip_index + 1))
+      else
+        printf 'DNS.%d = %s\n' "$dns_index" "$host"
+        dns_index=$((dns_index + 1))
+      fi
+    done
+  } >"$config_file"
+}
+
+ensure_ssl_cert() {
+  if [[ "$SSL_ENABLED" != "1" ]]; then
+    return
+  fi
+  if [[ -f "$SSL_CERT_FILE" && -f "$SSL_KEY_FILE" ]]; then
+    return
+  fi
+  if [[ "$SSL_AUTO_GENERATE" != "1" ]]; then
+    echo "SSL cert/key not found: $SSL_CERT_FILE / $SSL_KEY_FILE" >&2
+    exit 1
+  fi
+
+  mkdir -p "$(dirname "$SSL_CERT_FILE")" "$(dirname "$SSL_KEY_FILE")"
+  local config_file
+  local hosts
+  config_file="$(mktemp)"
+  hosts="$(detect_ssl_hosts)"
+  write_ssl_openssl_config "$config_file" "$hosts"
+  openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout "$SSL_KEY_FILE" \
+    -out "$SSL_CERT_FILE" \
+    -config "$config_file" >/dev/null 2>&1
+  rm -f "$config_file"
+  echo "Generated self-signed SSL certificate: $SSL_CERT_FILE"
+  echo "Certificate hosts: $hosts"
 }
 
 whisper_cpp_library_path() {
@@ -197,6 +354,10 @@ start_whisper_cpp_server() {
 
 backend_command() {
   cd "$PROJECT_ROOT"
+  local ssl_args=()
+  if [[ "$SSL_ENABLED" == "1" ]]; then
+    ssl_args=(--certfile "$SSL_CERT_FILE" --keyfile "$SSL_KEY_FILE")
+  fi
   exec gunicorn app.main:app \
     --chdir "$PROJECT_ROOT/demo/backend" \
     --worker-class uvicorn.workers.UvicornWorker \
@@ -204,11 +365,14 @@ backend_command() {
     --bind "$BACKEND_HOST:$BACKEND_PORT" \
     --timeout 0 \
     --access-logfile - \
-    --error-logfile -
+    --error-logfile - \
+    "${ssl_args[@]}"
 }
 
 frontend_command() {
   cd "$PROJECT_ROOT/demo/frontend"
+  VITE_API_BASE="${DEMO_FRONTEND_API_BASE:-}" \
+  VITE_BACKEND_TARGET="$BACKEND_PROXY_TARGET" \
   exec npm run dev -- --host "$FRONTEND_HOST" --port "$FRONTEND_PORT"
 }
 
@@ -242,16 +406,19 @@ stop_pid() {
 }
 
 start_background() {
-  ensure_dirs
-  activate_conda
-  check_dependencies
-
+  ensure_pid_dir
   if is_running "$BACKEND_PID" || is_running "$FRONTEND_PID"; then
     echo "Demo is already running. Use restart or stop first."
     status
     exit 1
   fi
 
+  ensure_dirs
+  activate_conda
+  check_dependencies
+  ensure_ssl_cert
+
+  refresh_current_log_link
   start_whisper_cpp_server
 
   (
@@ -264,20 +431,23 @@ start_background() {
   ) >"$LOG_DIR/frontend.log" 2>&1 &
   echo "$!" >"$FRONTEND_PID"
 
-  echo "Backend:  http://127.0.0.1:$BACKEND_PORT"
-  echo "Frontend: http://127.0.0.1:$FRONTEND_PORT"
+  echo "Backend:  $(public_scheme)://127.0.0.1:$BACKEND_PORT"
+  echo "Frontend: $(public_scheme)://127.0.0.1:$FRONTEND_PORT"
+  echo "API proxy: $BACKEND_PROXY_TARGET"
   echo "whisper.cpp: http://$WHISPER_CPP_HOST:$WHISPER_CPP_PORT"
   echo "Logs:     $LOG_DIR"
   echo "Audio:    $SAVE_DIR"
 }
 
 stop_all() {
+  ensure_pid_dir
   stop_pid "frontend" "$FRONTEND_PID"
   stop_pid "backend" "$BACKEND_PID"
   stop_pid "whisper.cpp server" "$WHISPER_CPP_PID"
 }
 
 status() {
+  ensure_pid_dir
   if is_running "$BACKEND_PID"; then
     echo "backend running pid=$(cat "$BACKEND_PID")"
   else
@@ -300,9 +470,17 @@ status() {
 }
 
 console() {
+  ensure_pid_dir
+  if is_running "$BACKEND_PID" || is_running "$FRONTEND_PID"; then
+    echo "Demo is already running. Use restart or stop first."
+    status
+    exit 1
+  fi
+
   ensure_dirs
   activate_conda
   check_dependencies
+  ensure_ssl_cert
 
   local backend_pid=""
   local frontend_pid=""
@@ -321,6 +499,7 @@ console() {
   }
   trap cleanup EXIT INT TERM
 
+  refresh_current_log_link
   start_whisper_cpp_server
   if is_running "$WHISPER_CPP_PID"; then
     whisper_cpp_pid="$(cat "$WHISPER_CPP_PID")"
@@ -336,8 +515,9 @@ console() {
   ) > >(tee -a "$LOG_DIR/frontend.log") 2>&1 &
   frontend_pid="$!"
 
-  echo "Backend:  http://127.0.0.1:$BACKEND_PORT"
-  echo "Frontend: http://127.0.0.1:$FRONTEND_PORT"
+  echo "Backend:  $(public_scheme)://127.0.0.1:$BACKEND_PORT"
+  echo "Frontend: $(public_scheme)://127.0.0.1:$FRONTEND_PORT"
+  echo "API proxy: $BACKEND_PROXY_TARGET"
   echo "whisper.cpp: http://$WHISPER_CPP_HOST:$WHISPER_CPP_PORT"
   echo "Logs:     $LOG_DIR"
   echo "Audio:    $SAVE_DIR"

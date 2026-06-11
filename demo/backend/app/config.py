@@ -10,11 +10,25 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
 
 DEFAULT_DEMO_CONFIG: dict[str, Any] = {
     "server": {
-        "backend_host": "0.0.0.0",
+        "backend_host": "127.0.0.1",
         "backend_port": 16000,
         "frontend_host": "0.0.0.0",
         "frontend_port": 16010,
         "gunicorn_workers": 1,
+        "ssl": {
+            "enabled": 0,
+            "auto_generate": 1,
+            "cert_file": "certs/demo.crt",
+            "key_file": "certs/demo.key",
+            "hosts": "auto",
+        },
+        "security": {
+            "cors_origins": [],
+            "hide_access_log_paths": ["/api/engine-status"],
+            "max_upload_mb": 100,
+            "max_audio_duration_seconds": 1200,
+            "max_active_sessions": 3,
+        },
     },
     "whisper_cpp": {
         "start_server": 1,

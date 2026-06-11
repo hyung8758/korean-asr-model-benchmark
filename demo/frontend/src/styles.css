@@ -367,13 +367,53 @@ h1 {
   font-size: 11px;
 }
 
-.error {
-  padding: 14px 16px;
+.error-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(15, 23, 42, 0.36);
+  backdrop-filter: blur(3px);
+}
+
+.error-popup {
+  display: grid;
+  gap: 16px;
+  width: min(420px, 100%);
+  padding: 18px;
   border: 1px solid #f0b4a8;
   border-radius: 8px;
-  background: #fff4f1;
-  color: #a33b2c;
-  font-weight: 800;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+  color: #111827;
+}
+
+.error-popup p {
+  margin: 0 0 6px;
+  color: #b8322b;
+  font-size: 12px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.error-popup strong {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.error-popup button {
+  justify-self: end;
+  min-height: 34px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 7px;
+  background: #c2412d;
+  color: #ffffff;
+  font-weight: 900;
 }
 
 .engine-table {

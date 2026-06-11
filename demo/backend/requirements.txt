@@ -3,6 +3,7 @@ uvicorn[standard]
 gunicorn
 python-multipart
 requests
+PyYAML
 torch
 torchaudio
 openai-whisper
@@ -10,3 +11,4 @@ faster-whisper
 transformers
 accelerate
 qwen-asr
+silero-vad

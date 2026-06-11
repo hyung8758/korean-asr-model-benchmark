@@ -29,6 +29,7 @@ pip install -r demo/backend/requirements.txt
 ```
 
 `nodejs`는 frontend 실행에 필요한 `npm`을 함께 설치한다. `gunicorn`은 `demo/backend/requirements.txt`에 포함되어 있다.
+데모의 마이크 녹음 구간 분리를 위해 `silero-vad`도 backend 의존성에 포함되어 있다.
 
 여러 엔진의 dependency가 충돌하면 이후 엔진별 conda 환경으로 분리한다. 지금 기본 문서는 단일 `korean-asr-benchmark` 환경을 기준으로 한다.
 

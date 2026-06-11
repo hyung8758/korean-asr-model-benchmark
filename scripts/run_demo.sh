@@ -2,31 +2,101 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BACKEND_HOST="${DEMO_BACKEND_HOST:-0.0.0.0}"
-BACKEND_PORT="${DEMO_BACKEND_PORT:-16000}"
-FRONTEND_HOST="${DEMO_FRONTEND_HOST:-0.0.0.0}"
-FRONTEND_PORT="${DEMO_FRONTEND_PORT:-16010}"
-GUNICORN_WORKERS="${DEMO_GUNICORN_WORKERS:-1}"
+CONFIG_PATH="${DEMO_CONFIG_PATH:-$PROJECT_ROOT/demo/config.yaml}"
 CONDA_ENV="${DEMO_CONDA_ENV:-korean-asr-benchmark}"
-START_WHISPER_CPP="${DEMO_START_WHISPER_CPP:-1}"
-WHISPER_CPP_HOST="${DEMO_WHISPER_CPP_HOST:-127.0.0.1}"
-WHISPER_CPP_PORT="${DEMO_WHISPER_CPP_PORT:-8100}"
-WHISPER_CPP_DEVICE_INDEX="${DEMO_WHISPER_CPP_DEVICE_INDEX:-2}"
-WHISPER_CPP_THREADS="${DEMO_WHISPER_CPP_THREADS:-4}"
-WHISPER_CPP_PROCESSORS="${DEMO_WHISPER_CPP_PROCESSORS:-1}"
-WHISPER_CPP_FLASH_ATTN="${DEMO_WHISPER_CPP_FLASH_ATTN:-0}"
-WHISPER_CPP_BINARY="${DEMO_WHISPER_CPP_BINARY:-$PROJECT_ROOT/third_party/whisper.cpp/build/bin/whisper-server}"
-WHISPER_CPP_MODEL_PATH="${DEMO_WHISPER_CPP_MODEL_PATH:-$PROJECT_ROOT/third_party/whisper.cpp/models/ggml-large-v3-q5_0.bin}"
-RUNTIME_DIR="${DEMO_RUNTIME_DIR:-$PROJECT_ROOT/demo/.runtime}"
-LOG_DIR="${DEMO_LOG_DIR:-$RUNTIME_DIR/logs}"
-SAVE_DIR="${DEMO_SAVE_DIR:-$RUNTIME_DIR/saved_audio}"
-BACKEND_PID="$RUNTIME_DIR/backend.pid"
-FRONTEND_PID="$RUNTIME_DIR/frontend.pid"
-WHISPER_CPP_PID="$RUNTIME_DIR/whisper_cpp_server.pid"
 
-export DEMO_RUNTIME_DIR="$RUNTIME_DIR"
+demo_config_value() {
+  local key="$1"
+  local default_value="$2"
+  python - "$CONFIG_PATH" "$key" "$default_value" <<'PY'
+import sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+key = sys.argv[2]
+default = sys.argv[3]
+
+try:
+    import yaml
+except Exception:
+    yaml = None
+
+if not config_path.exists():
+    print(default)
+    raise SystemExit
+
+if yaml is not None:
+    with config_path.open("r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+else:
+    data = {}
+    stack = [(-1, data)]
+    for raw_line in config_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.split("#", 1)[0].rstrip()
+        if not line.strip() or ":" not in line or line.lstrip().startswith("- "):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        key_part, value_part = line.strip().split(":", 1)
+        key_part = key_part.strip()
+        value_part = value_part.strip()
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+        parent = stack[-1][1]
+        if not value_part:
+            parent[key_part] = {}
+            stack.append((indent, parent[key_part]))
+            continue
+        parent[key_part] = value_part.strip("\"'")
+
+value = data
+for part in key.split("."):
+    if not isinstance(value, dict) or part not in value:
+        print(default)
+        raise SystemExit
+    value = value[part]
+
+print(value)
+PY
+}
+
+resolve_project_path() {
+  local path_value="$1"
+  if [[ "$path_value" = /* ]]; then
+    printf '%s\n' "$path_value"
+  else
+    printf '%s\n' "$PROJECT_ROOT/$path_value"
+  fi
+}
+
+BACKEND_HOST="${DEMO_BACKEND_HOST:-$(demo_config_value server.backend_host 0.0.0.0)}"
+BACKEND_PORT="${DEMO_BACKEND_PORT:-$(demo_config_value server.backend_port 16000)}"
+FRONTEND_HOST="${DEMO_FRONTEND_HOST:-$(demo_config_value server.frontend_host 0.0.0.0)}"
+FRONTEND_PORT="${DEMO_FRONTEND_PORT:-$(demo_config_value server.frontend_port 16010)}"
+GUNICORN_WORKERS="${DEMO_GUNICORN_WORKERS:-$(demo_config_value server.gunicorn_workers 1)}"
+START_WHISPER_CPP="${DEMO_START_WHISPER_CPP:-$(demo_config_value whisper_cpp.start_server 1)}"
+WHISPER_CPP_HOST="${DEMO_WHISPER_CPP_HOST:-$(demo_config_value whisper_cpp.host 127.0.0.1)}"
+WHISPER_CPP_PORT="${DEMO_WHISPER_CPP_PORT:-$(demo_config_value whisper_cpp.port 8100)}"
+WHISPER_CPP_DEVICE_INDEX="${DEMO_WHISPER_CPP_DEVICE_INDEX:-$(demo_config_value whisper_cpp.device_index 2)}"
+WHISPER_CPP_THREADS="${DEMO_WHISPER_CPP_THREADS:-$(demo_config_value whisper_cpp.threads 4)}"
+WHISPER_CPP_PROCESSORS="${DEMO_WHISPER_CPP_PROCESSORS:-$(demo_config_value whisper_cpp.processors 1)}"
+WHISPER_CPP_FLASH_ATTN="${DEMO_WHISPER_CPP_FLASH_ATTN:-$(demo_config_value whisper_cpp.flash_attention 0)}"
+WHISPER_CPP_BINARY_VALUE="${DEMO_WHISPER_CPP_BINARY:-$(demo_config_value whisper_cpp.binary third_party/whisper.cpp/build/bin/whisper-server)}"
+WHISPER_CPP_MODEL_PATH_VALUE="${DEMO_WHISPER_CPP_MODEL_PATH:-$(demo_config_value whisper_cpp.model_path third_party/whisper.cpp/models/ggml-large-v3-q5_0.bin)}"
+WHISPER_CPP_BINARY="$(resolve_project_path "$WHISPER_CPP_BINARY_VALUE")"
+WHISPER_CPP_MODEL_PATH="$(resolve_project_path "$WHISPER_CPP_MODEL_PATH_VALUE")"
+RUN_ID="${DEMO_RUN_ID:-$(date +%Y%m%d_%H%M%S)_log}"
+RUN_DIR="${DEMO_RUN_DIR:-$PROJECT_ROOT/logs/$RUN_ID}"
+LOG_DIR="${DEMO_LOG_DIR:-$RUN_DIR}"
+SAVE_DIR="${DEMO_SAVE_DIR:-$RUN_DIR/saved_audio}"
+PID_DIR="${DEMO_PID_DIR:-$PROJECT_ROOT/logs/current}"
+BACKEND_PID="$PID_DIR/backend.pid"
+FRONTEND_PID="$PID_DIR/frontend.pid"
+WHISPER_CPP_PID="$PID_DIR/whisper_cpp_server.pid"
+
+export DEMO_RUN_DIR="$RUN_DIR"
 export DEMO_LOG_DIR="$LOG_DIR"
 export DEMO_SAVE_DIR="$SAVE_DIR"
+export DEMO_CONFIG_PATH="$CONFIG_PATH"
 export DEMO_BACKEND_PORT="$BACKEND_PORT"
 export DEMO_FRONTEND_PORT="$FRONTEND_PORT"
 export DEMO_WHISPER_CPP_SERVER_URL="http://$WHISPER_CPP_HOST:$WHISPER_CPP_PORT/inference"
@@ -39,22 +109,26 @@ Default action is console.
 
 Environment variables:
   DEMO_CONDA_ENV          Default: korean-asr-benchmark
-  DEMO_BACKEND_HOST       Default: 0.0.0.0
-  DEMO_BACKEND_PORT       Default: 16000
-  DEMO_FRONTEND_HOST      Default: 0.0.0.0
-  DEMO_FRONTEND_PORT      Default: 16010
-  DEMO_GUNICORN_WORKERS   Default: 1
-  DEMO_LOG_DIR            Default: demo/.runtime/logs
-  DEMO_SAVE_DIR           Default: demo/.runtime/saved_audio
-  DEMO_START_WHISPER_CPP  Default: 1
-  DEMO_WHISPER_CPP_PORT   Default: 8100
-  DEMO_WHISPER_CPP_FLASH_ATTN Default: 0
-  DEMO_WHISPER_CPP_MODEL_PATH
+  DEMO_CONFIG_PATH        Default: demo/config.yaml
+  DEMO_BACKEND_HOST       Default: demo config server.backend_host
+  DEMO_BACKEND_PORT       Default: demo config server.backend_port
+  DEMO_FRONTEND_HOST      Default: demo config server.frontend_host
+  DEMO_FRONTEND_PORT      Default: demo config server.frontend_port
+  DEMO_GUNICORN_WORKERS   Default: demo config server.gunicorn_workers
+  DEMO_RUN_ID             Default: YYYYMMDD_HHMMSS_log
+  DEMO_RUN_DIR            Default: logs/YYYYMMDD_HHMMSS_log
+  DEMO_LOG_DIR            Default: DEMO_RUN_DIR
+  DEMO_SAVE_DIR           Default: DEMO_RUN_DIR/saved_audio
+  DEMO_PID_DIR            Default: logs/current
+  DEMO_START_WHISPER_CPP  Default: demo config whisper_cpp.start_server
+  DEMO_WHISPER_CPP_PORT   Default: demo config whisper_cpp.port
+  DEMO_WHISPER_CPP_FLASH_ATTN Default: demo config whisper_cpp.flash_attention
+  DEMO_WHISPER_CPP_MODEL_PATH Default: demo config whisper_cpp.model_path
 EOF
 }
 
 ensure_dirs() {
-  mkdir -p "$LOG_DIR" "$SAVE_DIR"
+  mkdir -p "$LOG_DIR" "$SAVE_DIR" "$PID_DIR"
 }
 
 check_command() {
@@ -302,12 +376,12 @@ console() {
 
   (
     backend_command
-  ) &
+  ) > >(tee -a "$LOG_DIR/backend.log") 2>&1 &
   backend_pid="$!"
 
   (
     frontend_command
-  ) &
+  ) > >(tee -a "$LOG_DIR/frontend.log") 2>&1 &
   frontend_pid="$!"
 
   echo "Backend:  http://127.0.0.1:$BACKEND_PORT"

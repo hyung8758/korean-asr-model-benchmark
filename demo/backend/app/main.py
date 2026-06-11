@@ -15,20 +15,30 @@ from fastapi.responses import RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.audio import read_wav_chunk, save_upload, wav_duration, write_wav
+from app.config import DEMO_CONFIG
 from app.engines import engine_manager
 from app.schemas import EngineInfo, EngineStatus, TranscriptionResponse
+from app.vad import VadSegment, create_vad
 
 
 app = FastAPI(title="한국어 STT 데모 서버")
-RUNTIME_DIR = Path(os.getenv("DEMO_RUNTIME_DIR", "demo/.runtime"))
-LOG_DIR = Path(os.getenv("DEMO_LOG_DIR", str(RUNTIME_DIR / "logs")))
-SAVE_DIR = Path(os.getenv("DEMO_SAVE_DIR", str(RUNTIME_DIR / "saved_audio")))
+DEFAULT_RUN_DIR = Path("logs") / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_log"
+RUN_DIR = Path(os.getenv("DEMO_RUN_DIR", str(DEFAULT_RUN_DIR)))
+LOG_DIR = Path(os.getenv("DEMO_LOG_DIR", str(RUN_DIR)))
+SAVE_DIR = Path(os.getenv("DEMO_SAVE_DIR", str(RUN_DIR / "saved_audio")))
 EVENT_LOG_PATH = LOG_DIR / "decoding_events.jsonl"
 MODEL_LOG_PATH = LOG_DIR / "model_events.jsonl"
 LOG_LOCK = threading.Lock()
-STREAM_PARTIAL_MIN_SECONDS = float(os.getenv("DEMO_STREAM_PARTIAL_MIN_SECONDS", "1.0"))
-STREAM_PARTIAL_INTERVAL_SECONDS = float(os.getenv("DEMO_STREAM_PARTIAL_INTERVAL_SECONDS", "1.0"))
-STREAM_PARTIAL_WINDOW_SECONDS = float(os.getenv("DEMO_STREAM_PARTIAL_WINDOW_SECONDS", "20.0"))
+DEFAULTS = DEMO_CONFIG["defaults"]
+SERVER_CONFIG = DEMO_CONFIG["server"]
+STREAMING_CONFIG = DEMO_CONFIG["streaming"]
+VAD_CONFIG = DEMO_CONFIG["vad"]
+DEFAULT_LANGUAGE = str(DEFAULTS["language"])
+DEFAULT_BEAM_SIZE = int(DEFAULTS["beam_size"])
+DEFAULT_TEMPERATURE = float(DEFAULTS["temperature"])
+STREAM_PARTIAL_INTERVAL_SECONDS = float(
+    os.getenv("DEMO_STREAM_PARTIAL_INTERVAL_SECONDS", STREAMING_CONFIG["partial_interval_seconds"])
+)
 
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
@@ -47,7 +57,7 @@ def root(request: Request) -> RedirectResponse:
     frontend_url = os.getenv("DEMO_FRONTEND_PUBLIC_URL")
     if frontend_url:
         return RedirectResponse(frontend_url)
-    frontend_port = os.getenv("DEMO_FRONTEND_PORT", "16010")
+    frontend_port = os.getenv("DEMO_FRONTEND_PORT", str(SERVER_CONFIG["frontend_port"]))
     return RedirectResponse(f"{request.url.scheme}://{request.url.hostname}:{frontend_port}")
 
 
@@ -79,42 +89,128 @@ def save_audio_copy(source_path: Path, request_id: str, engine_id: str, mode: st
     return output_path
 
 
-def pcm_byte_duration(byte_count: int, wav_settings: tuple[int, int, int]) -> float:
-    channels, sample_width, sample_rate = wav_settings
-    bytes_per_second = channels * sample_width * sample_rate
-    if bytes_per_second <= 0:
-        return 0.0
-    return byte_count / bytes_per_second
-
-
-def recent_pcm(pcm_parts: list[bytes], wav_settings: tuple[int, int, int], seconds: float) -> bytes:
-    channels, sample_width, sample_rate = wav_settings
-    frame_size = channels * sample_width
-    max_bytes = int(seconds * sample_rate * frame_size)
-    max_bytes -= max_bytes % frame_size
-    if max_bytes <= 0:
-        return b"".join(pcm_parts)
-
-    remaining = max_bytes
-    selected = []
-    for part in reversed(pcm_parts):
-        if remaining <= 0:
-            break
-        if len(part) <= remaining:
-            selected.append(part)
-            remaining -= len(part)
-        else:
-            selected.append(part[-remaining:])
-            remaining = 0
-    return b"".join(reversed(selected))
-
-
 async def send_websocket_json(websocket: WebSocket, payload: dict) -> bool:
     try:
         await websocket.send_json(payload)
         return True
     except (RuntimeError, WebSocketDisconnect):
         return False
+
+
+def parse_engine_ids(engine_ids: str) -> list[str]:
+    values = [engine_id.strip() for engine_id in engine_ids.split(",") if engine_id.strip()]
+    if not values:
+        raise ValueError("최소 하나 이상의 engine_id가 필요합니다.")
+    return values
+
+
+async def send_status_event(
+    websocket: WebSocket,
+    engine_ids: list[str],
+    status: str,
+    vad_id: str,
+    utterance_index: int | None = None,
+    utterance_total: int | None = None,
+) -> bool:
+    payload = {
+        "type": "status",
+        "engine_ids": engine_ids,
+        "status": status,
+        "vad": vad_id,
+    }
+    if utterance_index is not None:
+        payload["utterance_index"] = utterance_index
+    if utterance_total is not None:
+        payload["utterance_total"] = utterance_total
+    return await send_websocket_json(websocket, payload)
+
+
+async def decode_vad_segment(
+    segment: VadSegment,
+    settings: tuple[int, int, int],
+    temp_dir: Path,
+    request_id: str,
+    engine_id: str,
+    language: str,
+    beam_size: int,
+    temperature: float,
+    mode: str,
+    save_audio: bool,
+) -> TranscriptionResponse:
+    audio_path = temp_dir / f"utterance_{segment.index}_{safe_name(engine_id)}_{mode}.wav"
+    write_wav(audio_path, segment.pcm, *settings)
+    saved_audio_path = save_audio_copy(audio_path, request_id, engine_id, mode) if save_audio else None
+    return await decode_file(
+        audio_path=audio_path,
+        engine_id=engine_id,
+        language=language,
+        beam_size=beam_size,
+        temperature=temperature,
+        mode=mode,
+        request_id=request_id,
+        saved_audio_path=saved_audio_path,
+    )
+
+
+async def send_segment_results(
+    websocket: WebSocket,
+    segment: VadSegment,
+    settings: tuple[int, int, int],
+    temp_dir: Path,
+    request_id: str,
+    engine_ids: list[str],
+    language: str,
+    beam_size: int,
+    temperature: float,
+    vad_id: str,
+    message_type: str,
+    mode: str,
+    save_audio: bool,
+    utterance_total: int | None = None,
+) -> bool:
+    async def decode_one(engine_id: str) -> tuple[str, TranscriptionResponse | None, Exception | None]:
+        try:
+            response = await decode_vad_segment(
+                segment=segment,
+                settings=settings,
+                temp_dir=temp_dir,
+                request_id=request_id,
+                engine_id=engine_id,
+                language=language,
+                beam_size=beam_size,
+                temperature=temperature,
+                mode=mode,
+                save_audio=save_audio,
+            )
+            return engine_id, response, None
+        except Exception as exc:
+            return engine_id, None, exc
+
+    tasks = [asyncio.create_task(decode_one(engine_id)) for engine_id in engine_ids]
+    for task in asyncio.as_completed(tasks):
+        engine_id, response, error = await task
+        if error is None and response is not None:
+            payload = {
+                "type": message_type,
+                "engine_id": engine_id,
+                "utterance_index": segment.index,
+                "start": round(segment.start, 3),
+                "end": round(segment.end, 3),
+                "vad": vad_id,
+                "result": response_payload(response),
+            }
+            if utterance_total is not None:
+                payload["utterance_total"] = utterance_total
+        else:
+            payload = {
+                "type": "error",
+                "engine_id": engine_id,
+                "utterance_index": segment.index,
+                "message": str(error),
+            }
+        if not await send_websocket_json(websocket, payload):
+            return False
+    return True
 
 
 @app.on_event("startup")
@@ -128,6 +224,11 @@ def preload_models() -> None:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "log_dir": str(LOG_DIR), "save_dir": str(SAVE_DIR)}
+
+
+@app.get("/api/demo-config")
+def demo_config() -> dict:
+    return DEMO_CONFIG
 
 
 @app.get("/api/engines", response_model=list[EngineInfo])
@@ -144,9 +245,9 @@ def engine_status() -> list[EngineStatus]:
 async def transcribe(
     file: UploadFile = File(...),
     engine_id: str = Form(...),
-    language: str = Form("ko"),
-    beam_size: int = Form(1),
-    temperature: float = Form(0.0),
+    language: str = Form(DEFAULT_LANGUAGE),
+    beam_size: int = Form(DEFAULT_BEAM_SIZE),
+    temperature: float = Form(DEFAULT_TEMPERATURE),
 ) -> TranscriptionResponse:
     request_id = uuid.uuid4().hex
     suffix = Path(file.filename or "audio.wav").suffix or ".wav"
@@ -261,95 +362,142 @@ async def decode_file(
     return response
 
 
-@app.websocket("/api/stream")
-async def stream(
+@app.websocket("/api/vad-stream")
+async def vad_stream(
     websocket: WebSocket,
-    engine_id: str,
-    language: str = "ko",
-    beam_size: int = 1,
-    temperature: float = 0.0,
+    engine_ids: str,
+    vad_id: str = str(DEFAULTS["vad"]),
+    stream_mode: str = str(DEFAULTS["mode"]),
+    language: str = DEFAULT_LANGUAGE,
+    beam_size: int = DEFAULT_BEAM_SIZE,
+    temperature: float = DEFAULT_TEMPERATURE,
+    input_source: str = "recording",
 ) -> None:
     await websocket.accept()
     request_id = uuid.uuid4().hex
-    pcm_parts: list[bytes] = []
     wav_settings: tuple[int, int, int] | None = None
-    chunk_index = 0
-    total_pcm_bytes = 0
     started_at = time.perf_counter()
     last_partial_at = 0.0
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        full_audio_path = Path(temp_dir) / "stream_full.wav"
-        partial_audio_path = Path(temp_dir) / "stream_partial.wav"
+        temp_path = Path(temp_dir)
         try:
+            target_engine_ids = parse_engine_ids(engine_ids)
+            vad = create_vad(vad_id, VAD_CONFIG.get(vad_id, {}))
             while True:
                 message = await websocket.receive()
                 if "text" in message and message["text"] == "stop":
-                    if not await send_websocket_json(websocket, {"type": "finalizing"}):
+                    if not await send_websocket_json(websocket, {"type": "finalizing", "vad": vad_id}):
                         return
+                    final_segments = [
+                        segment
+                        for segment in vad.pop_final_segments(force=True)
+                        if segment.pcm and wav_settings is not None
+                    ]
+                    utterance_total = len(final_segments) if input_source == "file" else None
+                    for segment in final_segments:
+                        if segment.pcm and wav_settings is not None:
+                            if not await send_status_event(
+                                websocket,
+                                target_engine_ids,
+                                "인식 중",
+                                vad_id,
+                                segment.index,
+                                utterance_total,
+                            ):
+                                return
+                            ok = await send_segment_results(
+                                websocket=websocket,
+                                segment=segment,
+                                settings=wav_settings,
+                                temp_dir=temp_path,
+                                request_id=request_id,
+                                engine_ids=target_engine_ids,
+                                language=language,
+                                beam_size=beam_size,
+                                temperature=temperature,
+                                vad_id=vad_id,
+                                message_type="utterance_final",
+                                mode="vad_utterance",
+                                save_audio=True,
+                                utterance_total=utterance_total,
+                            )
+                            if not ok:
+                                return
+                    await send_websocket_json(
+                        websocket,
+                        {
+                            "type": "session_final",
+                            "engine_ids": target_engine_ids,
+                            "vad": vad_id,
+                            "elapsed": round(time.perf_counter() - started_at, 3),
+                        },
+                    )
                     break
                 if "bytes" not in message:
                     continue
 
                 frames, channels, sample_width, sample_rate = read_wav_chunk(message["bytes"])
-                if wav_settings is None:
-                    wav_settings = (channels, sample_width, sample_rate)
-                elif wav_settings != (channels, sample_width, sample_rate):
-                    raise ValueError("streaming chunk audio format이 중간에 변경되었습니다.")
-                pcm_parts.append(frames)
-                chunk_index += 1
-                total_pcm_bytes += len(frames)
+                wav_settings = (channels, sample_width, sample_rate)
+                vad.append(frames, wav_settings)
+                if not await send_status_event(websocket, target_engine_ids, "VAD 진행 중", vad_id):
+                    return
+                if not await send_websocket_json(websocket, {"type": "chunk_ack", "vad": vad_id}):
+                    return
+                if input_source == "file":
+                    continue
 
-                duration = pcm_byte_duration(total_pcm_bytes, wav_settings)
+                for segment in vad.pop_final_segments(force=False):
+                    if not segment.pcm:
+                        continue
+                    if not await send_status_event(websocket, target_engine_ids, "인식 중", vad_id, segment.index):
+                        return
+                    ok = await send_segment_results(
+                        websocket=websocket,
+                        segment=segment,
+                        settings=wav_settings,
+                        temp_dir=temp_path,
+                        request_id=request_id,
+                        engine_ids=target_engine_ids,
+                        language=language,
+                        beam_size=beam_size,
+                        temperature=temperature,
+                        vad_id=vad_id,
+                        message_type="utterance_final",
+                        mode="vad_utterance",
+                        save_audio=True,
+                    )
+                    if not ok:
+                        return
+
                 now = time.perf_counter()
-                if duration < STREAM_PARTIAL_MIN_SECONDS:
+                if stream_mode != "streaming":
                     continue
                 if now - last_partial_at < STREAM_PARTIAL_INTERVAL_SECONDS:
                     continue
-
+                segment = vad.current_speech_segment()
+                if segment is None or not segment.pcm:
+                    continue
                 last_partial_at = now
-                write_wav(
-                    partial_audio_path,
-                    recent_pcm(pcm_parts, wav_settings, STREAM_PARTIAL_WINDOW_SECONDS),
-                    *wav_settings,
-                )
-                response = await decode_file(
-                    audio_path=partial_audio_path,
-                    engine_id=engine_id,
-                    language=language,
-                    beam_size=beam_size,
-                    temperature=temperature,
-                    mode="streaming_partial",
-                    request_id=request_id,
-                    saved_audio_path=None,
-                )
-                if not await send_websocket_json(
-                    websocket,
-                    {
-                        "type": "partial",
-                        "chunk_index": chunk_index,
-                        "elapsed": round(time.perf_counter() - started_at, 3),
-                        "result": response_payload(response),
-                    },
-                ):
+                if not await send_status_event(websocket, target_engine_ids, "인식 중", vad_id, segment.index):
                     return
-
-            if pcm_parts and wav_settings is not None:
-                write_wav(full_audio_path, b"".join(pcm_parts), *wav_settings)
-                saved_audio_path = save_audio_copy(full_audio_path, request_id, engine_id, "streaming")
-                response = await decode_file(
-                    audio_path=full_audio_path,
-                    engine_id=engine_id,
+                ok = await send_segment_results(
+                    websocket=websocket,
+                    segment=segment,
+                    settings=wav_settings,
+                    temp_dir=temp_path,
+                    request_id=request_id,
+                    engine_ids=target_engine_ids,
                     language=language,
                     beam_size=beam_size,
                     temperature=temperature,
-                    mode="streaming",
-                    request_id=request_id,
-                    saved_audio_path=saved_audio_path,
+                    vad_id=vad_id,
+                    message_type="partial",
+                    mode="vad_streaming_partial",
+                    save_audio=False,
                 )
-                await send_websocket_json(websocket, {"type": "final", "result": response_payload(response)})
-            else:
-                await send_websocket_json(websocket, {"type": "final", "result": None})
+                if not ok:
+                    return
         except WebSocketDisconnect:
             return
         except Exception as exc:

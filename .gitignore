@@ -6,6 +6,7 @@ protected_exp/
 history/
 
 # logs / outputs
+logs/
 *.out
 nohup.out
 *.log

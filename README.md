@@ -54,6 +54,6 @@ Backend:  http://127.0.0.1:16000
 Frontend: http://127.0.0.1:16010
 ```
 
-offline 모드는 녹음/업로드 후 한 번에 인식하고, streaming 모드는 1초 chunk를 이용한 pseudo-streaming으로 중간 결과를 갱신한다. 자세한 설정은 [docs/demo_server.md](docs/demo_server.md)를 참고한다.
+파일 업로드는 전체 음성을 한 번에 인식하고, 마이크 녹음은 Silero VAD로 발화 단위를 자른 뒤 offline 또는 pseudo-streaming 방식으로 결과를 갱신한다. 자세한 설정은 [docs/demo_server.md](docs/demo_server.md)를 참고한다.
 
 원본 데이터, 정제된 벤치마크 데이터, 결과물은 GitHub에 포함하지 않는다.

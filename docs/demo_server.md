@@ -14,12 +14,51 @@ demo/
 
 backend는 FastAPI, frontend는 Vite/React로 구성되어 있다.
 
+### 데모 설정
+
+데모 기본 옵션은 `demo/config.yaml`에서 수정한다.
+
+```yaml
+server:
+  backend_port: 16000
+  frontend_port: 16010
+
+defaults:
+  language: ko
+  beam_size: 1
+  temperature: 0.0
+  mode: offline
+  vad: silero
+
+recording:
+  chunk_ms: 1000
+
+streaming:
+  partial_interval_seconds: 1.0
+  status_poll_interval_ms: 1000
+
+vad:
+  silero:
+    padding_ms: 300
+    min_speech_ms: 250
+    min_silence_ms: 500
+    threshold: 0.5
+
+ui:
+  mode_change_feedback_ms: 1000
+```
+
+`scripts/run_demo.sh`와 backend는 시작 시 이 파일을 읽는다. backend는 `/api/demo-config`로 frontend에도 같은 설정을 전달한다. 값을 바꾼 뒤에는 데모 서버를 재시작해야 한다.
+
 ### 화면 동작
 
 - 왼쪽 모델 row를 클릭하면 해당 엔진이 선택/해제된다.
-- 파일 드랍존에 음성을 올리고 `인식`을 누르면 선택된 엔진으로 offline 인식을 수행한다.
+- 파일 드랍존에 음성을 올리고 `인식`을 누르면 선택된 엔진으로 VAD 기반 인식을 수행한다. 파일 인식 중에는 버튼이 `중지`로 바뀌며, 누르면 현재 파일 인식을 중단한다.
 - 마이크 버튼을 누르면 녹음이 시작되고, 다시 누르면 중지된다.
 - `Offline / Streaming` 스위치는 같은 위치를 눌러 모드를 전환한다.
+- `VAD` dropdown은 현재 `Silero`만 선택할 수 있으며, 이후 다른 VAD로 확장할 수 있게 UI 구조만 열어둔다.
+- 각 모델 row의 모델 dropdown은 현재 backend에 설정된 모델 1개만 표시한다. 데모에서는 모델 리로딩을 수행하지 않는다.
+- 각 모델 row의 언어 dropdown은 현재 `한국어`만 표시한다.
 - 녹음 중에는 모드 전환과 파일 업로드 인식이 잠긴다.
 - 새 녹음이나 새 파일 인식을 시작하면 이전 요청은 frontend에서 즉시 취소되고, 늦게 도착한 이전 결과는 화면에 반영하지 않는다.
 - 이미 backend 디코더에 들어간 작업은 모델 라이브러리 특성상 강제 중단하지 않고 끝까지 실행될 수 있다. 대신 같은 엔진의 디코딩은 backend에서 직렬화해 모델 객체에 요청이 겹치지 않게 한다.
@@ -74,48 +113,60 @@ scripts/run_demo.sh status
 
 ```text
 DEMO_CONDA_ENV=korean-asr-benchmark
+DEMO_CONFIG_PATH=demo/config.yaml
 DEMO_BACKEND_HOST=0.0.0.0
 DEMO_BACKEND_PORT=16000
 DEMO_FRONTEND_HOST=0.0.0.0
 DEMO_FRONTEND_PORT=16010
 DEMO_GUNICORN_WORKERS=1
-DEMO_RUNTIME_DIR=demo/.runtime
-DEMO_LOG_DIR=demo/.runtime/logs
-DEMO_SAVE_DIR=demo/.runtime/saved_audio
+DEMO_RUN_ID=YYYYMMDD_HHMMSS_log
+DEMO_RUN_DIR=logs/YYYYMMDD_HHMMSS_log
+DEMO_LOG_DIR=logs/YYYYMMDD_HHMMSS_log
+DEMO_SAVE_DIR=logs/YYYYMMDD_HHMMSS_log/saved_audio
+DEMO_PID_DIR=logs/current
 DEMO_START_WHISPER_CPP=1
 DEMO_WHISPER_CPP_PORT=8100
 DEMO_WHISPER_CPP_DEVICE_INDEX=2
 DEMO_WHISPER_CPP_FLASH_ATTN=0
 DEMO_WHISPER_CPP_MODEL=large-v3-q5_0
 DEMO_WHISPER_CPP_MODEL_PATH=third_party/whisper.cpp/models/ggml-large-v3-q5_0.bin
-DEMO_STREAM_PARTIAL_MIN_SECONDS=1.0
 DEMO_STREAM_PARTIAL_INTERVAL_SECONDS=1.0
-DEMO_STREAM_PARTIAL_WINDOW_SECONDS=20.0
+DEMO_VAD_PADDING_MS=300
+DEMO_VAD_MIN_SPEECH_MS=250
+DEMO_VAD_MIN_SILENCE_MS=500
+DEMO_VAD_THRESHOLD=0.5
 ```
+
+기본값은 `demo/config.yaml`을 먼저 사용하고, 같은 항목의 환경변수가 있으면 환경변수가 우선한다.
 
 backend가 시작되면 Python 기반 모델은 백그라운드에서 미리 로딩된다. 화면에는 `모델 로딩 중`, `준비 완료`, `인식 중` 상태가 표시된다. `DEMO_GUNICORN_WORKERS`를 늘리면 worker마다 모델을 따로 로딩할 수 있으므로, 데모 비교 용도에서는 기본값 `1`을 유지한다.
 
 offline 모드에서 여러 엔진을 선택하면 같은 음성을 선택된 엔진들에 병렬 요청한다. 각 모델을 서로 다른 GPU에 올려두면 한 번의 녹음 또는 업로드로 여러 엔진의 처리 시간을 빠르게 비교할 수 있다.
 
-streaming 모드는 실제 streaming decoder가 아니라 pseudo-streaming이다. frontend가 기본 1000ms 단위로 wav chunk를 보내고, backend가 일정 시간마다 최근 window를 기존 offline decoder에 넣어 partial 결과를 만든다. stop 이후에는 전체 녹음본을 다시 인식해 final 결과를 반환한다.
+마이크 녹음은 VAD 기반으로 처리한다. frontend가 기본 1000ms 단위로 wav chunk를 보내면 backend의 단일 VAD 세션이 Silero VAD로 발화 시작/끝을 찾고, 확정된 발화 단위를 선택된 STT 엔진들에 전달한다. VAD는 엔진별로 따로 돌지 않고 녹음 세션당 하나만 동작한다.
 
-기본값은 첫 partial을 빠르게 보기 위한 설정이다.
+offline 모드는 VAD가 발화 단위를 찾을 때마다 결과를 누적한다. streaming 모드는 발화 중 partial 결과가 갱신되고, VAD가 발화 끝을 찾으면 해당 결과가 고정된다.
+
+VAD 기본값은 아래와 같다.
 
 ```text
-DEMO_STREAM_PARTIAL_MIN_SECONDS=1.0
+DEMO_VAD_PADDING_MS=300
+DEMO_VAD_MIN_SPEECH_MS=250
+DEMO_VAD_MIN_SILENCE_MS=500
+DEMO_VAD_THRESHOLD=0.5
 DEMO_STREAM_PARTIAL_INTERVAL_SECONDS=1.0
-DEMO_STREAM_PARTIAL_WINDOW_SECONDS=20.0
 ```
 
 값을 바꾸려면 backend를 다시 시작해야 한다.
 
 ```bash
-DEMO_STREAM_PARTIAL_MIN_SECONDS=0.5 \
+DEMO_VAD_PADDING_MS=300 \
+DEMO_VAD_MIN_SILENCE_MS=400 \
 DEMO_STREAM_PARTIAL_INTERVAL_SECONDS=1.0 \
 bash scripts/run_demo.sh restart
 ```
 
-chunk 전송 단위는 frontend의 `DEFAULT_OPTIONS.chunkMs`에서 조정한다. 기본값은 `1000`이다.
+chunk 전송 단위는 `demo/config.yaml`의 `recording.chunk_ms`에서 조정한다. 기본값은 `1000`이다.
 
 기본 GPU 배치는 아래와 같다. 필요하면 환경변수로 바꾼다.
 
@@ -130,22 +181,26 @@ DEMO_GHOST613_DEVICE=cuda:5
 
 ### 로그와 저장 음성
 
-디코딩 요청에 사용된 음성은 기본적으로 아래 위치에 저장된다.
+데모를 실행하면 기본적으로 실행 시각 기반 로그 디렉토리가 생성된다.
 
 ```text
-demo/.runtime/saved_audio/
+logs/YYYYMMDD_HHMMSS_log/
 ```
 
-디코딩 로그는 jsonl 형식으로 저장된다.
+해당 디렉토리에는 서버 로그, 디코딩 이벤트, 모델 로딩 이벤트, 저장 음성이 함께 남는다.
 
 ```text
-demo/.runtime/logs/decoding_events.jsonl
-demo/.runtime/logs/model_events.jsonl
+logs/YYYYMMDD_HHMMSS_log/backend.log
+logs/YYYYMMDD_HHMMSS_log/frontend.log
+logs/YYYYMMDD_HHMMSS_log/whisper_cpp_server.log
+logs/YYYYMMDD_HHMMSS_log/decoding_events.jsonl
+logs/YYYYMMDD_HHMMSS_log/model_events.jsonl
+logs/YYYYMMDD_HHMMSS_log/saved_audio/
 ```
 
 `decoding_events.jsonl`에는 요청 ID, 엔진, 모델, 저장 음성 경로, audio duration, model load time, decode time, total time, RTF, 처리량, segment 개수 등이 남는다. `model_events.jsonl`에는 lazy-load가 발생한 모델 로딩 시간이 기록된다.
 
-`demo/.runtime/` 아래 로그와 저장 음성은 로컬 실행 산출물이며 GitHub에 포함하지 않는다.
+`logs/` 아래 로그와 저장 음성은 로컬 실행 산출물이며 GitHub에 포함하지 않는다. 실행 중인 데모의 pid 파일은 `logs/current/`에 저장된다.
 
 ### Backend 실행
 
@@ -203,9 +258,10 @@ VITE_API_BASE=http://127.0.0.1:16000 npm run dev
 ### 지원 기능
 
 - OpenAI Whisper, faster-whisper, whisper.cpp server, Qwen3-ASR, Hugging Face Transformers 모델 선택
-- 마이크 녹음 후 offline 디코딩
-- 음성 파일 업로드 후 offline 디코딩
-- 1000ms 기본 chunk 단위 pseudo-streaming
+- 마이크 녹음 후 VAD 발화 단위 offline 디코딩
+- 음성 파일 업로드 후 VAD 발화 단위 offline/streaming 디코딩
+- Silero VAD 기반 pseudo-streaming
+- VAD dropdown, 고정 모델 표시, 한국어 언어 표시
 - streaming 중 새 녹음 시작 시 이전 결과 flush
 - 파일 드래그 앤 드롭 업로드
 - 디코딩 시간, 전체 처리 시간, RTF, segment timestamp 표시

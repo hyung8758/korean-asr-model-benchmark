@@ -39,7 +39,7 @@ class TranscriptionResult:
 DEFAULT_ENGINES = [
     EngineSpec(
         id="openai_whisper_large_v3",
-        name="OpenAI Whisper large-v3",
+        name="OpenAI Whisper",
         provider="OpenAI Whisper",
         kind="openai_whisper",
         model=os.getenv("DEMO_OPENAI_WHISPER_MODEL", "large-v3"),
@@ -48,7 +48,7 @@ DEFAULT_ENGINES = [
     ),
     EngineSpec(
         id="faster_whisper_large_v3",
-        name="faster-whisper large-v3",
+        name="faster-whisper",
         provider="faster-whisper",
         kind="faster_whisper",
         model=os.getenv("DEMO_FASTER_WHISPER_MODEL", "large-v3"),
@@ -57,7 +57,7 @@ DEFAULT_ENGINES = [
     ),
     EngineSpec(
         id="whisper_cpp_server_large_v3",
-        name="whisper.cpp server large-v3",
+        name="whisper.cpp server",
         provider="whisper.cpp",
         kind="whisper_cpp_server",
         model=os.getenv("DEMO_WHISPER_CPP_MODEL", "large-v3-q5_0"),
@@ -67,7 +67,7 @@ DEFAULT_ENGINES = [
     ),
     EngineSpec(
         id="qwen3_speech_recognition",
-        name="Qwen3-ASR-1.7B",
+        name="Qwen3-ASR",
         provider="Qwen",
         kind="qwen_speech_recognition",
         model=os.getenv("DEMO_QWEN_MODEL", "Qwen/Qwen3-ASR-1.7B"),

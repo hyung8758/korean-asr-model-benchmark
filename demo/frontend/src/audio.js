@@ -67,6 +67,66 @@ function mergeBuffers(buffers) {
   return merged;
 }
 
+function audioBufferToMono(audioBuffer) {
+  if (audioBuffer.numberOfChannels === 1) {
+    return audioBuffer.getChannelData(0);
+  }
+  const result = new Float32Array(audioBuffer.length);
+  for (let channel = 0; channel < audioBuffer.numberOfChannels; channel += 1) {
+    const data = audioBuffer.getChannelData(channel);
+    for (let index = 0; index < data.length; index += 1) {
+      result[index] += data[index] / audioBuffer.numberOfChannels;
+    }
+  }
+  return result;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    throw new DOMException('작업이 중지되었습니다.', 'AbortError');
+  }
+}
+
+function waitNextFrame() {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, 0);
+  });
+}
+
+export async function streamAudioFileChunks({ file, chunkMs = 1000, onChunk, onProgress, signal } = {}) {
+  if (!file) {
+    throw new Error('음성 파일이 선택되지 않았습니다.');
+  }
+  if (!onChunk) {
+    throw new Error('onChunk callback이 필요합니다.');
+  }
+
+  throwIfAborted(signal);
+  const audioContext = new AudioContext();
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    throwIfAborted(signal);
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    throwIfAborted(signal);
+    const samples = audioBufferToMono(audioBuffer);
+    const sourceChunkSamples = Math.max(1, Math.round(audioBuffer.sampleRate * chunkMs / 1000));
+
+    for (let start = 0; start < samples.length; start += sourceChunkSamples) {
+      throwIfAborted(signal);
+      const end = Math.min(samples.length, start + sourceChunkSamples);
+      const sourceChunk = samples.slice(start, end);
+      const chunk = downsample(sourceChunk, audioBuffer.sampleRate);
+      await onChunk(encodeWav(chunk));
+      if (onProgress) {
+        onProgress(end / samples.length);
+      }
+      await waitNextFrame();
+    }
+  } finally {
+    await audioContext.close();
+  }
+}
+
 export async function createPcmRecorder({ onLevel, onChunk, chunkMs = 1000 } = {}) {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const audioContext = new AudioContext();

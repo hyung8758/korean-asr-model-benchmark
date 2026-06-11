@@ -2,7 +2,7 @@ server:
   backend_host: 127.0.0.1
   backend_port: 16000
   frontend_host: 0.0.0.0
-  frontend_port: 16010
+  frontend_port: 41301
   gunicorn_workers: 1
   ssl:
     enabled: 1

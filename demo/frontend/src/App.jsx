@@ -140,6 +140,9 @@ export default function App() {
         notifiedEngineErrorsRef.current.delete(engine.id);
         continue;
       }
+      if (!isGlobalEngineError(engineStatus)) {
+        continue;
+      }
       if (notifiedEngineErrorsRef.current.has(engine.id)) {
         continue;
       }
@@ -943,16 +946,18 @@ function rowStatus(selected, result, engineStatus, modeChanged, mode) {
   if (engineStatus?.state === 'loading') {
     return { label: '모델 로딩 중', active: true };
   }
-  if (engineStatus?.state === 'decoding') {
-    return { label: '인식 중', active: true };
-  }
-  if (engineStatus?.state === 'error') {
+  if (isGlobalEngineError(engineStatus)) {
     return { label: engineStatus.label || '로딩 실패', active: false };
   }
   if (result.status === '완료') {
     return { label: '완료', active: false };
   }
-  return { label: engineStatus?.label || '준비 완료', active: false };
+  const idleLabel = ['decoding', 'error'].includes(engineStatus?.state) ? '준비 완료' : engineStatus?.label || '준비 완료';
+  return { label: idleLabel, active: false };
+}
+
+function isGlobalEngineError(engineStatus) {
+  return engineStatus?.state === 'error' && ['로딩 실패', 'server 미실행'].includes(engineStatus.label);
 }
 
 function MiniMetric({ label, value, tone = 'gray' }) {

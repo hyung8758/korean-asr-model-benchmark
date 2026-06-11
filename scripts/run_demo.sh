@@ -299,6 +299,16 @@ finally:
 PY
 }
 
+ensure_port_free() {
+  local name="$1"
+  local port="$2"
+  if port_is_open 127.0.0.1 "$port"; then
+    echo "$name port is already in use: $port" >&2
+    echo "Stop the existing process first, or change demo/config.yaml." >&2
+    exit 1
+  fi
+}
+
 start_whisper_cpp_server() {
   if [[ "$START_WHISPER_CPP" != "1" ]]; then
     return
@@ -366,7 +376,7 @@ frontend_command() {
   cd "$PROJECT_ROOT/demo/frontend"
   VITE_API_BASE="${DEMO_FRONTEND_API_BASE:-}" \
   VITE_BACKEND_TARGET="$BACKEND_PROXY_TARGET" \
-  exec npm run dev -- --host "$FRONTEND_HOST" --port "$FRONTEND_PORT"
+  exec npm run dev -- --host "$FRONTEND_HOST" --port "$FRONTEND_PORT" --strictPort
 }
 
 is_running() {
@@ -398,6 +408,31 @@ stop_pid() {
   rm -f "$pid_file"
 }
 
+stop_matching_processes() {
+  local name="$1"
+  local pattern="$2"
+  if ! pgrep -f "$pattern" >/dev/null 2>&1; then
+    return
+  fi
+
+  echo "Stopping orphan $name process."
+  pkill -TERM -f "$pattern" >/dev/null 2>&1 || true
+  for _ in {1..10}; do
+    if ! pgrep -f "$pattern" >/dev/null 2>&1; then
+      return
+    fi
+    sleep 0.3
+  done
+  pkill -KILL -f "$pattern" >/dev/null 2>&1 || true
+}
+
+stop_orphan_demo_processes() {
+  stop_matching_processes "frontend vite" "korean-asr-model-benchmark/demo/frontend/node_modules/.bin/vite"
+  stop_matching_processes "frontend npm" "npm run dev -- --host .* --port"
+  stop_matching_processes "backend gunicorn" "gunicorn app.main:app --chdir .*/korean-asr-model-benchmark/demo/backend"
+  stop_matching_processes "whisper.cpp server" "korean-asr-model-benchmark/third_party/whisper.cpp/build/bin/whisper-server"
+}
+
 start_background() {
   ensure_pid_dir
   if is_running "$BACKEND_PID" || is_running "$FRONTEND_PID"; then
@@ -410,6 +445,8 @@ start_background() {
   activate_conda
   check_dependencies
   ensure_ssl_cert
+  ensure_port_free "backend" "$BACKEND_PORT"
+  ensure_port_free "frontend" "$FRONTEND_PORT"
 
   refresh_current_log_link
   start_whisper_cpp_server
@@ -437,6 +474,7 @@ stop_all() {
   stop_pid "frontend" "$FRONTEND_PID"
   stop_pid "backend" "$BACKEND_PID"
   stop_pid "whisper.cpp server" "$WHISPER_CPP_PID"
+  stop_orphan_demo_processes
 }
 
 status() {
@@ -474,6 +512,8 @@ console() {
   activate_conda
   check_dependencies
   ensure_ssl_cert
+  ensure_port_free "backend" "$BACKEND_PORT"
+  ensure_port_free "frontend" "$FRONTEND_PORT"
 
   local backend_pid=""
   local frontend_pid=""

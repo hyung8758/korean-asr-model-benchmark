@@ -213,6 +213,54 @@ async def send_segment_results(
     return True
 
 
+async def decode_and_send_segments(
+    websocket: WebSocket,
+    segments: list[VadSegment],
+    settings: tuple[int, int, int] | None,
+    temp_dir: Path,
+    request_id: str,
+    engine_ids: list[str],
+    language: str,
+    beam_size: int,
+    temperature: float,
+    vad_id: str,
+    utterance_total: int | None = None,
+) -> bool:
+    if settings is None:
+        return True
+    for segment in segments:
+        if not segment.pcm:
+            continue
+        if not await send_status_event(
+            websocket,
+            engine_ids,
+            "인식 중",
+            vad_id,
+            segment.index,
+            utterance_total,
+        ):
+            return False
+        ok = await send_segment_results(
+            websocket=websocket,
+            segment=segment,
+            settings=settings,
+            temp_dir=temp_dir,
+            request_id=request_id,
+            engine_ids=engine_ids,
+            language=language,
+            beam_size=beam_size,
+            temperature=temperature,
+            vad_id=vad_id,
+            message_type="utterance_final",
+            mode="vad_utterance",
+            save_audio=True,
+            utterance_total=utterance_total,
+        )
+        if not ok:
+            return False
+    return True
+
+
 @app.on_event("startup")
 def preload_models() -> None:
     def log_preload_event(event: dict) -> None:
@@ -395,35 +443,21 @@ async def vad_stream(
                         if segment.pcm and wav_settings is not None
                     ]
                     utterance_total = len(final_segments) if input_source == "file" else None
-                    for segment in final_segments:
-                        if segment.pcm and wav_settings is not None:
-                            if not await send_status_event(
-                                websocket,
-                                target_engine_ids,
-                                "인식 중",
-                                vad_id,
-                                segment.index,
-                                utterance_total,
-                            ):
-                                return
-                            ok = await send_segment_results(
-                                websocket=websocket,
-                                segment=segment,
-                                settings=wav_settings,
-                                temp_dir=temp_path,
-                                request_id=request_id,
-                                engine_ids=target_engine_ids,
-                                language=language,
-                                beam_size=beam_size,
-                                temperature=temperature,
-                                vad_id=vad_id,
-                                message_type="utterance_final",
-                                mode="vad_utterance",
-                                save_audio=True,
-                                utterance_total=utterance_total,
-                            )
-                            if not ok:
-                                return
+                    ok = await decode_and_send_segments(
+                        websocket=websocket,
+                        segments=final_segments,
+                        settings=wav_settings,
+                        temp_dir=temp_path,
+                        request_id=request_id,
+                        engine_ids=target_engine_ids,
+                        language=language,
+                        beam_size=beam_size,
+                        temperature=temperature,
+                        vad_id=vad_id,
+                        utterance_total=utterance_total,
+                    )
+                    if not ok:
+                        return
                     await send_websocket_json(
                         websocket,
                         {
@@ -447,28 +481,20 @@ async def vad_stream(
                 if input_source == "file":
                     continue
 
-                for segment in vad.pop_final_segments(force=False):
-                    if not segment.pcm:
-                        continue
-                    if not await send_status_event(websocket, target_engine_ids, "인식 중", vad_id, segment.index):
-                        return
-                    ok = await send_segment_results(
-                        websocket=websocket,
-                        segment=segment,
-                        settings=wav_settings,
-                        temp_dir=temp_path,
-                        request_id=request_id,
-                        engine_ids=target_engine_ids,
-                        language=language,
-                        beam_size=beam_size,
-                        temperature=temperature,
-                        vad_id=vad_id,
-                        message_type="utterance_final",
-                        mode="vad_utterance",
-                        save_audio=True,
-                    )
-                    if not ok:
-                        return
+                ok = await decode_and_send_segments(
+                    websocket=websocket,
+                    segments=vad.pop_final_segments(force=False),
+                    settings=wav_settings,
+                    temp_dir=temp_path,
+                    request_id=request_id,
+                    engine_ids=target_engine_ids,
+                    language=language,
+                    beam_size=beam_size,
+                    temperature=temperature,
+                    vad_id=vad_id,
+                )
+                if not ok:
+                    return
 
                 now = time.perf_counter()
                 if stream_mode != "streaming":

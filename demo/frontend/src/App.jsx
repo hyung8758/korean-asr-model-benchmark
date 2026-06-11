@@ -234,6 +234,14 @@ export default function App() {
     }));
   }
 
+  function updateResultsFor(engineRows, patch) {
+    engineRows.forEach((engine) => updateResult(engine.id, patch));
+  }
+
+  function resetResultsFor(engineRows, status) {
+    updateResultsFor(engineRows, { ...EMPTY_RESULT, status });
+  }
+
   function closeStreamingSockets() {
     for (const socket of Object.values(socketsRef.current)) {
       if ([WebSocket.CONNECTING, WebSocket.OPEN].includes(socket.readyState)) {
@@ -323,7 +331,7 @@ export default function App() {
     setError('');
     setLevel(0);
     setStatus('음성 업로드 중');
-    runnableEngines.forEach((engine) => updateResult(engine.id, { ...EMPTY_RESULT, status: '음성 업로드 중' }));
+    resetResultsFor(runnableEngines, '음성 업로드 중');
 
     try {
       await openVadSocket(runId, '음성 업로드 중', 'file');
@@ -358,7 +366,7 @@ export default function App() {
       if (isActiveRun(runId)) {
         setError(exception.message);
         setStatus('오류');
-        runnableEngines.forEach((engine) => updateResult(engine.id, { status: '오류', error: exception.message }));
+        updateResultsFor(runnableEngines, { status: '오류', error: exception.message });
       }
       setIsFileProcessing(false);
       fileAbortControllerRef.current = null;
@@ -376,7 +384,7 @@ export default function App() {
       setLevel(0);
       setIsRecording(true);
       setStatus(mode === 'streaming' ? '스트리밍 녹음 중' : '녹음 중');
-      runnableEngines.forEach((engine) => updateResult(engine.id, { ...EMPTY_RESULT, status: mode === 'streaming' ? '연결 중' : '대기' }));
+      resetResultsFor(runnableEngines, mode === 'streaming' ? '연결 중' : '대기');
 
       await openVadSocket(runId, 'VAD 진행 중', 'recording');
       recorderRef.current = await createPcmRecorder({
@@ -424,16 +432,11 @@ export default function App() {
       }
       if (message.type === 'status') {
         message.engine_ids.forEach((engineId) => {
-          const label = message.status === '인식 중' && Number.isInteger(message.utterance_index) && Number.isInteger(message.utterance_total)
-            ? `인식 중 (${message.utterance_index + 1}/${message.utterance_total})`
-            : message.status === '인식 중' && Number.isInteger(message.utterance_index)
-              ? `인식 중 ${message.utterance_index + 1}`
-            : message.status;
-          updateResult(engineId, { status: label });
+          updateResult(engineId, { status: recognitionStatusLabel(message) });
         });
       }
       if (message.type === 'finalizing') {
-        runnableEngines.forEach((engine) => updateResult(engine.id, { status: '최종 인식 중' }));
+        updateResultsFor(runnableEngines, { status: '최종 인식 중' });
       }
       if (message.type === 'partial') {
         updateResult(message.engine_id, {
@@ -450,7 +453,7 @@ export default function App() {
         });
       }
       if (message.type === 'session_final') {
-        runnableEngines.forEach((engine) => updateResult(engine.id, { status: '완료' }));
+        updateResultsFor(runnableEngines, { status: '완료' });
         socket.close();
         setIsFileProcessing(false);
         setIsFileStopping(false);
@@ -471,7 +474,7 @@ export default function App() {
       return;
     }
     socketsRef.current = { vad: socket };
-    runnableEngines.forEach((engine) => updateResult(engine.id, { status: readyStatus }));
+    updateResultsFor(runnableEngines, { status: readyStatus });
   }
 
   function resolveNextChunkAck() {
@@ -531,7 +534,7 @@ export default function App() {
     setIsFileStopping(true);
     setLevel(0);
     setStatus('중지 중');
-    runnableEngines.forEach((engine) => updateResult(engine.id, { status: '중지 중' }));
+    updateResultsFor(runnableEngines, { status: '중지 중' });
     waitUntilFileDecodingStops(runnableEngines.map((engine) => engine.id));
   }
 
@@ -829,6 +832,23 @@ function modelOptionsFor(engine) {
   return [{ value: engine.model, label: modelSizeLabel(engine.model) }];
 }
 
+function recognitionStatusLabel(message) {
+  if (message.status !== '인식 중') {
+    return message.status;
+  }
+  if (Number.isInteger(message.utterance_index) && Number.isInteger(message.utterance_total)) {
+    return `인식 중 (${message.utterance_index + 1}/${message.utterance_total})`;
+  }
+  if (Number.isInteger(message.utterance_index)) {
+    return `인식 중 ${message.utterance_index + 1}`;
+  }
+  return message.status;
+}
+
+function isActiveStatus(status) {
+  return ['인식 중', '연결 중', '스트리밍 중', '최종 인식 중', 'VAD 진행 중'].some((word) => status.startsWith(word));
+}
+
 function rowStatus(selected, result, engineStatus, modeChanged, mode) {
   if (!selected) {
     return { label: '비활성화', active: false };
@@ -837,7 +857,7 @@ function rowStatus(selected, result, engineStatus, modeChanged, mode) {
     return { label: mode === 'streaming' ? 'streaming 모드' : 'offline 모드', active: false, modeChanging: true };
   }
   if (result.status && !['대기', '완료'].includes(result.status)) {
-    return { label: result.status, active: ['인식 중', '연결 중', '스트리밍 중', '최종 인식 중', 'VAD 진행 중'].some((word) => result.status.startsWith(word)) };
+    return { label: result.status, active: isActiveStatus(result.status) };
   }
   if (engineStatus?.state === 'loading') {
     return { label: '모델 로딩 중', active: true };

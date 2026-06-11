@@ -8,55 +8,7 @@ CONDA_ENV="${DEMO_CONDA_ENV:-korean-asr-benchmark}"
 demo_config_value() {
   local key="$1"
   local default_value="$2"
-  python - "$CONFIG_PATH" "$key" "$default_value" <<'PY'
-import sys
-from pathlib import Path
-
-config_path = Path(sys.argv[1])
-key = sys.argv[2]
-default = sys.argv[3]
-
-try:
-    import yaml
-except Exception:
-    yaml = None
-
-if not config_path.exists():
-    print(default)
-    raise SystemExit
-
-if yaml is not None:
-    with config_path.open("r", encoding="utf-8") as handle:
-        data = yaml.safe_load(handle) or {}
-else:
-    data = {}
-    stack = [(-1, data)]
-    for raw_line in config_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.split("#", 1)[0].rstrip()
-        if not line.strip() or ":" not in line or line.lstrip().startswith("- "):
-            continue
-        indent = len(line) - len(line.lstrip(" "))
-        key_part, value_part = line.strip().split(":", 1)
-        key_part = key_part.strip()
-        value_part = value_part.strip()
-        while stack and indent <= stack[-1][0]:
-            stack.pop()
-        parent = stack[-1][1]
-        if not value_part:
-            parent[key_part] = {}
-            stack.append((indent, parent[key_part]))
-            continue
-        parent[key_part] = value_part.strip("\"'")
-
-value = data
-for part in key.split("."):
-    if not isinstance(value, dict) or part not in value:
-        print(default)
-        raise SystemExit
-    value = value[part]
-
-print(value)
-PY
+  python "$PROJECT_ROOT/demo/tools/read_config_value.py" "$CONFIG_PATH" "$key" "$default_value"
 }
 
 resolve_project_path() {

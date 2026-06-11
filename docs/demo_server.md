@@ -28,12 +28,6 @@ bash scripts/run_demo.sh stop
 bash scripts/run_demo.sh restart
 ```
 
-localhost HTTP 모드:
-
-```bash
-DEMO_LOCAL_MODE=1 bash scripts/run_demo.sh
-```
-
 ### 설정
 
 기본 설정은 `demo/config.yaml`에서 수정한다. 값을 바꾼 뒤에는 데모를 재시작한다.
@@ -45,7 +39,7 @@ server:
   backend_host: 127.0.0.1
   backend_port: 16000
   frontend_host: 0.0.0.0
-  frontend_port: 41301
+  frontend_port: 16010
   ssl:
     enabled: 1
     auto_generate: 1
@@ -54,7 +48,7 @@ server:
 접속 예시:
 
 ```text
-https://서버_IP_또는_도메인:41301
+https://서버_IP_또는_도메인:16010
 ```
 
 업로드 크기, 음성 길이, 동시 실행 수는 `server.security`에서 조정한다. 기본값은 100MB, 20분, 동시 3세션이다.

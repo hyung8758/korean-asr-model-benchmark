@@ -4,7 +4,6 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_PATH="${DEMO_CONFIG_PATH:-$PROJECT_ROOT/demo/config.yaml}"
 CONDA_ENV="${DEMO_CONDA_ENV:-korean-asr-benchmark}"
-LOCAL_MODE="${DEMO_LOCAL_MODE:-0}"
 
 demo_config_value() {
   local key="$1"
@@ -40,11 +39,6 @@ WHISPER_CPP_PROCESSORS="${DEMO_WHISPER_CPP_PROCESSORS:-$(demo_config_value whisp
 WHISPER_CPP_FLASH_ATTN="${DEMO_WHISPER_CPP_FLASH_ATTN:-$(demo_config_value whisper_cpp.flash_attention 0)}"
 WHISPER_CPP_BINARY_VALUE="${DEMO_WHISPER_CPP_BINARY:-$(demo_config_value whisper_cpp.binary third_party/whisper.cpp/build/bin/whisper-server)}"
 WHISPER_CPP_MODEL_PATH_VALUE="${DEMO_WHISPER_CPP_MODEL_PATH:-$(demo_config_value whisper_cpp.model_path third_party/whisper.cpp/models/ggml-large-v3-q5_0.bin)}"
-if [[ "$LOCAL_MODE" == "1" ]]; then
-  BACKEND_HOST="127.0.0.1"
-  FRONTEND_HOST="127.0.0.1"
-  SSL_ENABLED="0"
-fi
 WHISPER_CPP_BINARY="$(resolve_project_path "$WHISPER_CPP_BINARY_VALUE")"
 WHISPER_CPP_MODEL_PATH="$(resolve_project_path "$WHISPER_CPP_MODEL_PATH_VALUE")"
 SSL_CERT_FILE="$(resolve_project_path "$SSL_CERT_FILE_VALUE")"
@@ -86,7 +80,6 @@ Default action is console.
 
 Environment variables:
   DEMO_CONDA_ENV          Default: korean-asr-benchmark
-  DEMO_LOCAL_MODE         Default: 0, set 1 for localhost HTTP mode
   DEMO_CONFIG_PATH        Default: demo/config.yaml
   DEMO_BACKEND_HOST       Default: demo config server.backend_host
   DEMO_BACKEND_PORT       Default: demo config server.backend_port

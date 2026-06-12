@@ -765,15 +765,18 @@ export default function App() {
       </section>
 
       <footer className="site-footer">
-        <span>Developed by Hyungwon Yang</span>
-        <a
-          href="https://github.com/hyung8758/korean-asr-model-benchmark"
-          target="_blank"
-          rel="noreferrer"
-          aria-label="GitHub repository"
-        >
-          <GitHubMark />
-        </a>
+        <div>
+          <span>Developed by Hyungwon Yang</span>
+          <a
+            href="https://github.com/hyung8758/korean-asr-model-benchmark"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="GitHub repository"
+          >
+            <GitHubMark />
+          </a>
+        </div>
+        <p>Mediazen, Inc. All rights reserved.</p>
       </footer>
     </main>
   );

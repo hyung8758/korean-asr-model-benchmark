@@ -6,6 +6,7 @@ from core.cuda import validate_cuda_device
 from core.config import experiment_name, result_dir_for
 from core.io import write_json
 from core.precision import SUPPORTED_TORCH_PRECISIONS, torch_dtype_from_precision
+from decoding.audio import prepared_audio_path
 from decoding.decode_loop import DecodeOutput, decode_rows
 from decoding.run_utils import (
     fail_if_all_samples_failed,
@@ -110,11 +111,12 @@ def run_qwen_speech_recognition(config: dict[str, Any], args) -> None:
         torch.cuda.reset_peak_memory_stats(config["device"])
 
     def decode_one(item: dict[str, Any]) -> DecodeOutput:
-        results = model.transcribe(
-            audio=item["audio"],
-            language=config["qwen_options"]["language"],
-            return_time_stamps=config["qwen_options"]["return_time_stamps"],
-        )
+        with prepared_audio_path(item) as audio_path:
+            results = model.transcribe(
+                audio=str(audio_path),
+                language=config["qwen_options"]["language"],
+                return_time_stamps=config["qwen_options"]["return_time_stamps"],
+            )
         result = results[0]
         return DecodeOutput(
             prediction_raw=str(getattr(result, "text", "")).strip(),

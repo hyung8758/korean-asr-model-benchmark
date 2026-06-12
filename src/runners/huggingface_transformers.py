@@ -6,6 +6,7 @@ from core.cuda import validate_cuda_device
 from core.config import experiment_name, result_dir_for
 from core.io import write_json
 from core.precision import SUPPORTED_TORCH_PRECISIONS, torch_dtype_from_precision
+from decoding.audio import TARGET_SAMPLE_RATE, load_audio_array
 from decoding.decode_loop import DecodeOutput, decode_rows
 from decoding.run_utils import (
     fail_if_all_samples_failed,
@@ -15,7 +16,6 @@ from decoding.run_utils import (
 
 
 LOGGER = logging.getLogger(__name__)
-TARGET_SAMPLE_RATE = 16000
 
 
 def apply_overrides(config: dict[str, Any], experiment: dict[str, Any], args) -> None:
@@ -82,17 +82,8 @@ def format_pipeline_segments(result: dict[str, Any]) -> list[dict[str, Any]]:
     return segments
 
 
-def load_audio_for_transformers_pipeline(audio_path: str) -> dict[str, Any]:
-    import torchaudio
-    from torchaudio.functional import resample
-
-    waveform, sample_rate = torchaudio.load(audio_path)
-    if waveform.size(0) > 1:
-        waveform = waveform.mean(dim=0, keepdim=True)
-    if sample_rate != TARGET_SAMPLE_RATE:
-        waveform = resample(waveform, sample_rate, TARGET_SAMPLE_RATE)
-    audio = waveform.squeeze(0).detach().cpu().numpy()
-    return {"array": audio, "sampling_rate": TARGET_SAMPLE_RATE}
+def load_audio_for_transformers_pipeline(item: dict[str, Any]) -> dict[str, Any]:
+    return {"array": load_audio_array(item), "sampling_rate": TARGET_SAMPLE_RATE}
 
 
 def load_transformers_model(config: dict[str, Any]):
@@ -161,7 +152,7 @@ def run_huggingface_transformers(config: dict[str, Any], args) -> None:
         torch.cuda.reset_peak_memory_stats(config["device"])
 
     def decode_one(item: dict[str, Any]) -> DecodeOutput:
-        audio_input = load_audio_for_transformers_pipeline(item["audio"])
+        audio_input = load_audio_for_transformers_pipeline(item)
         result = model(
             audio_input,
             generate_kwargs=config["transformers_options"]["generate_kwargs"],

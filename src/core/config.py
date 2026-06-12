@@ -6,7 +6,7 @@ from core.io import read_json
 
 DEFAULT_CONFIG = {
     "engine": "openai_whisper",
-    "manifest_path": "benchmark_data/manifest.jsonl",
+    "manifest_path": "data/benchmark/manifest.jsonl",
     "result_root": "results",
     "device": "cuda:0",
     "language": "ko",

@@ -1,8 +1,8 @@
 {
   "engine": "huggingface_transformers",
-  "manifest_path": "benchmark_data/huggingface_transformers_combined_manifest.jsonl",
+  "manifest_path": "data/benchmark/huggingface_transformers_combined_manifest.jsonl",
   "manifest_paths": [
-    "benchmark_data/manifest.jsonl"
+    "data/benchmark/manifest.jsonl"
   ],
   "result_root": "results",
   "language": "ko",

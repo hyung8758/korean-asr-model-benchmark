@@ -113,7 +113,7 @@ def make_prediction_row(
     config: dict[str, Any],
 ) -> dict[str, Any]:
     duration = float(item["duration"])
-    return {
+    row = {
         "id": item["id"],
         "audio": item["audio"],
         "reference": item["text"],
@@ -130,6 +130,8 @@ def make_prediction_row(
         "segments": segments,
         **result_metadata(config),
     }
+    copy_optional_item_fields(row, item)
+    return row
 
 
 def make_error_row(
@@ -139,7 +141,7 @@ def make_error_row(
     decode_time: float,
     config: dict[str, Any],
 ) -> dict[str, Any]:
-    return {
+    row = {
         "id": item["id"],
         "audio": item["audio"],
         "dataset": item["dataset"],
@@ -150,6 +152,25 @@ def make_error_row(
         "error": error,
         **result_metadata(config),
     }
+    copy_optional_item_fields(row, item)
+    return row
+
+
+def copy_optional_item_fields(row: dict[str, Any], item: dict[str, Any]) -> None:
+    optional_fields = (
+        "source_audio",
+        "source_text",
+        "audio_sample_rate",
+        "source_sample_rate",
+        "audio_start",
+        "audio_end",
+        "source_audio_start",
+        "source_audio_end",
+        "finetuning_split",
+    )
+    for field in optional_fields:
+        if field in item:
+            row[field] = item[field]
 
 
 def finish_run(run_config: dict[str, Any], decoded_count: int, error_count: int) -> None:

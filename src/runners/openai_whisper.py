@@ -5,6 +5,7 @@ from typing import Any
 from core.cuda import validate_cuda_device
 from core.config import experiment_name, result_dir_for
 from core.io import write_json
+from decoding.audio import load_audio_array
 from decoding.decode_loop import DecodeOutput, decode_rows
 from decoding.run_utils import (
     fail_if_all_samples_failed,
@@ -94,7 +95,8 @@ def run_openai_whisper(config: dict[str, Any], args) -> None:
         torch.cuda.reset_peak_memory_stats(config["device"])
 
     def decode_one(item: dict[str, Any]) -> DecodeOutput:
-        result = model.transcribe(item["audio"], **config["decode_options"])
+        audio_input = load_audio_array(item)
+        result = model.transcribe(audio_input, **config["decode_options"])
         return DecodeOutput(
             prediction_raw=result.get("text", "").strip(),
             segments=format_segments(result),

@@ -1,6 +1,6 @@
 {
   "engine": "whisper_cpp_server",
-  "manifest_path": "benchmark_data/manifest.jsonl",
+  "manifest_path": "data/benchmark/manifest.jsonl",
   "result_root": "results",
   "language": "ko",
   "server_binary_path": "third_party/whisper.cpp/build/bin/whisper-server",

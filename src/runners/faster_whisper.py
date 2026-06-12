@@ -4,6 +4,7 @@ from typing import Any
 
 from core.config import experiment_name, result_dir_for
 from core.io import write_json
+from decoding.audio import load_audio_array
 from decoding.decode_loop import DecodeOutput, decode_rows
 from decoding.run_utils import (
     fail_if_all_samples_failed,
@@ -132,7 +133,8 @@ def run_faster_whisper(config: dict[str, Any], args) -> None:
     )
 
     def decode_one(item: dict[str, Any]) -> DecodeOutput:
-        segment_generator, _info = model.transcribe(item["audio"], **config["transcribe_options"])
+        audio_input = load_audio_array(item)
+        segment_generator, _info = model.transcribe(audio_input, **config["transcribe_options"])
         prediction_raw, segments = format_segments(segment_generator)
         return DecodeOutput(prediction_raw=prediction_raw, segments=segments)
 

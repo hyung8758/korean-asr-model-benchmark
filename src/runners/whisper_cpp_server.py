@@ -10,6 +10,7 @@ from tqdm import tqdm
 
 from core.config import experiment_name, result_dir_for
 from core.io import append_jsonl, write_json
+from decoding.audio import prepared_audio_path
 from decoding.run_utils import (
     fail_if_all_samples_failed,
     finish_run,
@@ -223,11 +224,12 @@ def parse_response(data: dict[str, Any]) -> tuple[str, list[dict[str, Any]], flo
     return prediction_raw, segments, float(inference_sec) if inference_sec is not None else None
 
 
-def transcribe(server_url: str, audio_path: str, fields: dict[str, str], timeout: float | None) -> tuple[dict[str, Any], float]:
-    start = time.perf_counter()
-    with Path(audio_path).open("rb") as audio_file:
-        files = {"file": (Path(audio_path).name, audio_file, "audio/wav")}
-        response = requests.post(server_url, data=fields, files=files, timeout=timeout)
+def transcribe(server_url: str, item: dict[str, Any], fields: dict[str, str], timeout: float | None) -> tuple[dict[str, Any], float]:
+    with prepared_audio_path(item) as audio_path:
+        start = time.perf_counter()
+        with audio_path.open("rb") as audio_file:
+            files = {"file": (audio_path.name, audio_file, "audio/wav")}
+            response = requests.post(server_url, data=fields, files=files, timeout=timeout)
     request_time = time.perf_counter() - start
     response.raise_for_status()
     return response.json(), request_time
@@ -238,7 +240,7 @@ def warmup_server(config: dict[str, Any], rows: list[dict[str, Any]]) -> None:
         return
     server_url = f"http://{config['host']}:{config['port']}/inference"
     try:
-        transcribe(server_url, rows[0]["audio"], request_fields(config), config.get("request_timeout_seconds"))
+        transcribe(server_url, rows[0], request_fields(config), config.get("request_timeout_seconds"))
         LOGGER.info("Warmup finished with id=%s", rows[0]["id"])
     except Exception:
         LOGGER.exception("Warmup failed; 벤치마크 디코딩을 계속합니다")
@@ -272,7 +274,7 @@ def decode_rows(
             try:
                 data, request_time = transcribe(
                     server_url,
-                    item["audio"],
+                    item,
                     fields,
                     config.get("request_timeout_seconds"),
                 )

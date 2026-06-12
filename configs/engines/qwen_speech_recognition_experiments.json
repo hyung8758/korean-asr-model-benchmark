@@ -1,8 +1,8 @@
 {
   "engine": "qwen_speech_recognition",
-  "manifest_path": "benchmark_data/qwen_speech_recognition_combined_manifest.jsonl",
+  "manifest_path": "data/benchmark/qwen_speech_recognition_combined_manifest.jsonl",
   "manifest_paths": [
-    "benchmark_data/manifest.jsonl"
+    "data/benchmark/manifest.jsonl"
   ],
   "result_root": "results",
   "language": "ko",

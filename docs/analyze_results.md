@@ -4,7 +4,7 @@
 
 ```bash
 python scripts/evaluate_predictions.py \
-  --manifest_path benchmark_data/manifest.jsonl \
+  --manifest_path data/benchmark/manifest.jsonl \
   --result_dir results/<engine>/<model>/<experiment>
 ```
 
@@ -12,7 +12,7 @@ python scripts/evaluate_predictions.py \
 
 ```bash
 python scripts/validate_predictions.py \
-  --manifest_path benchmark_data/manifest.jsonl \
+  --manifest_path data/benchmark/manifest.jsonl \
   --predictions results/<engine>/<model>/<experiment>/predictions.jsonl
 ```
 

@@ -12,7 +12,7 @@ from core.metrics import evaluate_result_dir
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Merge predictions and write metrics.json.")
-    parser.add_argument("--manifest_path", type=Path, default=Path("benchmark_data/manifest.jsonl"))
+    parser.add_argument("--manifest_path", type=Path, default=Path("data/benchmark/manifest.jsonl"))
     parser.add_argument("--result_dir", type=Path, required=True)
     return parser.parse_args()
 

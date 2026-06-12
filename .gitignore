@@ -1,9 +1,10 @@
 # data / benchmark artifacts
-data/
-benchmark_data/
-results/
-protected_exp/
-history/
+/data/
+/benchmark_data/
+/domain_finetuning/
+/results/
+/protected_exp/
+/history/
 
 # logs / outputs
 logs/

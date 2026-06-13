@@ -1,0 +1,37 @@
+base_model_name_or_path: openai/whisper-small
+language: Korean
+task: transcribe
+seed: 42
+sampling_rate: 16000
+
+train_path: data/whisper_small_lora/train.jsonl
+dev_path: data/whisper_small_lora/dev.jsonl
+eval_path: data/whisper_small_lora/eval.jsonl
+output_root: exp/train
+run_name:
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - q_proj
+    - v_proj
+  bias: none
+
+training:
+  epoch: 3
+  learning_rate: 0.0001
+  warmup_steps: 200
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 2
+  gradient_accumulation_steps: 8
+  gradient_checkpointing: false
+  fp16: true
+  bf16: false
+  logging_steps: 50
+  save_total_limit:
+  dataloader_num_workers: 2
+  generation_max_length: 225
+  predict_with_generate: false
+  resume_from_checkpoint:

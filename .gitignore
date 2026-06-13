@@ -1,7 +1,8 @@
 # data / benchmark artifacts
 /data/
 /benchmark_data/
-/domain_finetuning/
+/domain_finetuning/data/
+/domain_finetuning/exp/
 /results/
 /protected_exp/
 /history/

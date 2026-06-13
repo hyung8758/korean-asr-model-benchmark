@@ -20,6 +20,7 @@ manifest.jsonl -> engine decoder -> predictions.jsonl/errors.jsonl -> metrics.js
 
 - 설치와 모델 준비: [docs/install.md](docs/install.md)
 - 데이터 준비: [docs/data_preparation.md](docs/data_preparation.md)
+- Whisper LoRA 학습: [domain_finetuning/README.md](domain_finetuning/README.md)
 - 실험 묶음 실행: [docs/run_benchmark_suites.md](docs/run_benchmark_suites.md)
 - 결과 분석: [docs/analyze_results.md](docs/analyze_results.md)
 - 실험 결과 정리: [docs/experiment_results.md](docs/experiment_results.md)
@@ -28,10 +29,9 @@ manifest.jsonl -> engine decoder -> predictions.jsonl/errors.jsonl -> metrics.js
 ### 빠른 실행 예시
 
 ```bash
-python scripts/prepare_whisper_benchmark_data.py \
-  --data_root ./data \
-  --output_root ./benchmark_data \
-  --sample_rate 16000 \
+python scripts/data/prepare_whisper_benchmark_data.py \
+  --data_root ./data/download \
+  --output_root ./data/benchmark \
   --max_hours_per_corpus 10 \
   --seed 42
 

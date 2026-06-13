@@ -21,6 +21,12 @@ torchaudio==2.8.0+cu128
 
 다른 CUDA 환경을 사용하면 먼저 PyTorch와 torchaudio 버전을 환경에 맞게 바꾼다.
 
+Whisper LoRA 파인튜닝은 별도 의존성 파일을 사용한다. 학습 실행 방법은 [domain_finetuning/README.md](../domain_finetuning/README.md)를 참고한다.
+
+```bash
+pip install -r domain_finetuning/requirements.txt
+```
+
 데모 서버까지 같은 환경에서 실행하려면 backend 의존성을 추가로 설치한다.
 
 ```bash
@@ -136,13 +142,16 @@ python scripts/run_whisper_cpp_server.py \
 
 자세한 데이터 준비 명령은 [data_preparation.md](data_preparation.md)에 정리되어 있다.
 
-이 저장소는 원본 corpus와 정제된 벤치마크 wav를 포함하지 않는다. 사용자는 corpus를 직접 준비한 뒤 `data/` 아래에 배치한다.
+이 저장소는 원본 corpus와 생성된 manifest/cache를 포함하지 않는다. 사용자는 corpus를 직접 준비한 뒤 `data/download/` 아래에 둔다.
 
 ```text
 data/
-  Zeroth Korean/
-  Pansori-TEDxKR/
-  ASR-KCSC Korean Conversational Speech Corpus/
+  download/
+    zeroth_korean.tar.gz
+    pansori-tedxkr-corpus-1.0.tar.gz
+    Korean_Conversational_Speech_Corpus.zip
+    extracted/
+    splits/
 ```
 
 디렉토리 이름은 정확히 일치하지 않아도 된다. prepare script는 lower-case 기준으로 다음 키워드를 이용해 corpus를 자동 추정한다.
@@ -156,10 +165,9 @@ kcsc, conversational, asr-kcsc
 벤치마크 manifest 생성:
 
 ```bash
-python scripts/prepare_whisper_benchmark_data.py \
-  --data_root ./data \
-  --output_root ./benchmark_data \
-  --sample_rate 16000 \
+python scripts/data/prepare_whisper_benchmark_data.py \
+  --data_root ./data/download \
+  --output_root ./data/benchmark \
   --max_hours_per_corpus 10 \
   --seed 42
 ```
@@ -167,15 +175,14 @@ python scripts/prepare_whisper_benchmark_data.py \
 출력:
 
 ```text
-benchmark_data/
-  wavs/
-    <utt_id>.wav
+data/benchmark/
   manifest.jsonl
   summary.json
   dropped_samples.jsonl
 ```
 
-`benchmark_data/`는 `.gitignore`에 포함되어 있으며 GitHub에 업로드하지 않는다.
+`data/benchmark/`는 `.gitignore`에 포함되어 있으며 GitHub에 업로드하지 않는다.
+구간 분할이 필요한 오디오는 `data/download/splits/`에 한 번 생성한 뒤 재사용한다.
 
 ### Hugging Face Transformers 모델
 

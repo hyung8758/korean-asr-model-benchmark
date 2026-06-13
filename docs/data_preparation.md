@@ -39,11 +39,14 @@ python scripts/data/prepare_whisper_benchmark_data.py \
 학습용 데이터도 benchmark manifest를 재사용하지 않고 raw corpus에서 직접 만든다.
 
 ```bash
-python scripts/data/prepare_whisper_finetuning_data.py \
-  --data_root ./data/download \
-  --output_root ./domain_finetuning/data/whisper_small_lora \
+cd domain_finetuning
+python scripts/prepare_data.py \
+  --data_root ../data/download \
+  --output_root ./data/whisper_small_lora \
   --seed 42
 ```
+
+자세한 fine-tuning 흐름은 [domain_finetuning/README.md](../domain_finetuning/README.md)를 참고한다.
 
 생성이 끝나면 `train/dev/eval` 파일 구조와 오디오 경로를 자동으로 검증한다.
 
@@ -59,10 +62,18 @@ domain_finetuning/data/whisper_small_lora/
     dropped_samples.jsonl
 ```
 
-학습용 jsonl은 STT 학습에 필요한 최소 필드만 저장한다.
+Fine-tuning jsonl은 학습 후 디코딩/평가까지 같은 파일을 쓰기 위해 아래 7개 필드로 고정한다.
 
 ```json
-{"id": "sample_id", "audio": "path/to/audio.wav", "text": "정규화된 정답 문장"}
+{
+  "id": "sample_id",
+  "audio": "path/to/audio.wav",
+  "text": "정규화된 정답 문장",
+  "duration": 3.21,
+  "dataset": "zeroth",
+  "bucket": "short",
+  "split": "train"
+}
 ```
 
 기본값은 1초 이상 30초 이하 utterance만 사용하고, dataset/bucket 기준으로 train/dev/eval을 8:1:1 비율로 deterministic split한다. `dev.jsonl`은 학습 중 validation에, `eval.jsonl`은 최종 성능 평가에 사용한다.
@@ -75,5 +86,5 @@ domain_finetuning/data/whisper_small_lora/
 - 둘 다 raw/extracted corpus를 직접 읽어서 생성한다.
 - 학습용 jsonl의 `audio`는 실제 사용할 오디오를 가리킨다.
 - 긴 원본에서 잘라낸 wav는 `data/download/splits/`에 한 번만 저장하고 benchmark/fine-tuning에서 같이 참조한다.
-- 원본 추적용 상세 정보는 학습 jsonl에 넣지 않고 `metadata/`, prepare log에서 확인한다.
+- 원본 추적용 상세 정보는 fine-tuning jsonl에 넣지 않고 `metadata/`, prepare log에서 확인한다.
 - 나중에 도메인 corpus가 추가되면 raw parser 또는 별도 data preparation을 추가해서 같은 manifest 형식으로 맞춘다.

@@ -1,5 +1,4 @@
 import logging
-import os
 import subprocess
 import time
 from pathlib import Path
@@ -18,6 +17,7 @@ from decoding.run_utils import (
     make_prediction_row,
     prepare_decode_run,
 )
+from whisper_cpp.runtime import env_with_library_dirs, library_dirs_from_build_dir
 
 
 LOGGER = logging.getLogger(__name__)
@@ -175,19 +175,8 @@ def start_server(config: dict[str, Any], log_path: Path) -> subprocess.Popen:
 
 
 def whisper_cpp_env(config: dict[str, Any]) -> dict[str, str]:
-    env = os.environ.copy()
     build_dir = Path(config["server_binary_path"]).resolve().parents[1]
-    library_dirs = [
-        build_dir / "src",
-        build_dir / "ggml" / "src",
-        build_dir / "ggml" / "src" / "ggml-cuda",
-    ]
-    existing = env.get("LD_LIBRARY_PATH", "")
-    values = [str(path) for path in library_dirs if path.exists()]
-    if existing:
-        values.append(existing)
-    env["LD_LIBRARY_PATH"] = ":".join(values)
-    return env
+    return env_with_library_dirs(library_dirs_from_build_dir(build_dir))
 
 
 def stop_server(process: subprocess.Popen | None) -> None:

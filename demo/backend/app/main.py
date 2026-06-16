@@ -17,6 +17,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.audio import read_wav_chunk, save_upload, wav_duration, write_wav
 from app.config import DEMO_CONFIG
+from app.engine_models import EngineSpec, TranscriptionResult
 from app.engines import engine_manager
 from app.schemas import EngineInfo, EngineStatus, TranscriptionResponse
 from app.vad import VadSegment, create_vad
@@ -33,6 +34,7 @@ class AccessLogPathFilter(logging.Filter):
 
 
 app = FastAPI(title="한국어 STT 데모 서버")
+LOGGER = logging.getLogger(__name__)
 DEFAULT_RUN_DIR = Path("logs") / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_log"
 RUN_DIR = Path(os.getenv("DEMO_RUN_DIR", str(DEFAULT_RUN_DIR)))
 LOG_DIR = Path(os.getenv("DEMO_LOG_DIR", str(RUN_DIR)))
@@ -53,6 +55,9 @@ MAX_AUDIO_DURATION_SECONDS = float(SECURITY_CONFIG.get("max_audio_duration_secon
 MAX_ACTIVE_SESSIONS = max(1, int(SECURITY_CONFIG.get("max_active_sessions", 1)))
 STREAM_PARTIAL_INTERVAL_SECONDS = float(
     os.getenv("DEMO_STREAM_PARTIAL_INTERVAL_SECONDS", STREAMING_CONFIG["partial_interval_seconds"])
+)
+STREAM_MIN_PARTIAL_AUDIO_SECONDS = float(
+    os.getenv("DEMO_STREAM_MIN_PARTIAL_AUDIO_SECONDS", STREAMING_CONFIG.get("min_partial_audio_seconds", 1.0))
 )
 SESSION_SEMAPHORE = asyncio.Semaphore(MAX_ACTIVE_SESSIONS)
 SESSION_LIMIT_LOCK = asyncio.Lock()
@@ -134,6 +139,10 @@ def audio_seconds_from_frames(frames: bytes, settings: tuple[int, int, int]) -> 
     return (len(frames) / frame_size) / sample_rate
 
 
+def vad_segment_duration(segment: VadSegment) -> float:
+    return max(0.0, segment.end - segment.start)
+
+
 def validate_upload_size(data: bytes) -> None:
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail=f"업로드 파일이 너무 큽니다. 최대 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB까지 허용합니다.")
@@ -142,6 +151,37 @@ def validate_upload_size(data: bytes) -> None:
 def validate_audio_duration(duration: float | None) -> None:
     if duration is not None and duration > MAX_AUDIO_DURATION_SECONDS:
         raise HTTPException(status_code=413, detail=f"음성이 너무 깁니다. 최대 {int(MAX_AUDIO_DURATION_SECONDS)}초까지 허용합니다.")
+
+
+def build_transcription_response(
+    result: TranscriptionResult,
+    request_id: str,
+    spec: EngineSpec,
+    mode: str,
+    audio_duration: float | None,
+    total_time: float,
+    saved_audio_path: Path | None = None,
+) -> TranscriptionResponse:
+    rtf = result.decode_time / audio_duration if audio_duration and audio_duration > 0 else None
+    chars_per_second = len(result.text) / result.decode_time if result.decode_time > 0 else None
+    audio_seconds_per_second = audio_duration / result.decode_time if audio_duration and result.decode_time > 0 else None
+    return TranscriptionResponse(
+        request_id=request_id,
+        engine=spec.name,
+        model=spec.model,
+        mode=mode,
+        text=result.text,
+        segments=result.segments,
+        saved_audio_path=str(saved_audio_path) if saved_audio_path else None,
+        audio_duration=audio_duration,
+        model_load_time=round(result.model_load_time, 6),
+        decode_time=round(result.decode_time, 6),
+        total_time=round(total_time, 6),
+        rtf=round(rtf, 6) if rtf is not None else None,
+        chars_per_second=round(chars_per_second, 3) if chars_per_second is not None else None,
+        audio_seconds_per_second=round(audio_seconds_per_second, 3) if audio_seconds_per_second is not None else None,
+        timing_source=result.timing_source,
+    )
 
 
 async def try_acquire_session() -> bool:
@@ -216,6 +256,9 @@ async def send_segment_results(
     save_audio: bool,
     utterance_total: int | None = None,
 ) -> bool:
+    if not engine_ids:
+        return True
+
     async def decode_one(engine_id: str) -> tuple[str, TranscriptionResponse | None, Exception | None]:
         try:
             response = await decode_vad_segment(
@@ -274,7 +317,7 @@ async def decode_and_send_segments(
     vad_id: str,
     utterance_total: int | None = None,
 ) -> bool:
-    if settings is None:
+    if settings is None or not engine_ids:
         return True
     for segment in segments:
         if not segment.pcm:
@@ -309,12 +352,78 @@ async def decode_and_send_segments(
     return True
 
 
+async def send_streaming_result(
+    websocket: WebSocket,
+    engine_id: str,
+    result,
+    request_id: str,
+    mode: str,
+    audio_duration: float | None,
+    utterance_index: int,
+    message_type: str,
+) -> bool:
+    if not result.text.strip():
+        return True
+    spec = engine_manager.get_spec(engine_id)
+    response = build_transcription_response(
+        result=result,
+        request_id=request_id,
+        spec=spec,
+        mode=mode,
+        audio_duration=audio_duration,
+        total_time=result.decode_time,
+    )
+    return await send_websocket_json(
+        websocket,
+        {
+            "type": message_type,
+            "engine_id": engine_id,
+            "utterance_index": utterance_index,
+            "start": None,
+            "end": None,
+            "vad": "whisper-streaming",
+            "result": response_payload(response),
+        },
+    )
+
+
+async def create_native_streaming_sessions(
+    engine_ids: list[str],
+    language: str,
+    beam_size: int,
+    temperature: float,
+) -> dict[str, str]:
+    sessions = {}
+    try:
+        for engine_id in engine_ids:
+            spec = engine_manager.get_spec(engine_id)
+            if spec.kind != "whisper_streaming":
+                continue
+            sessions[engine_id] = await run_in_threadpool(
+                engine_manager.start_stream,
+                engine_id,
+                language,
+                beam_size,
+                temperature,
+            )
+        return sessions
+    except Exception:
+        for engine_id, session_id in sessions.items():
+            await run_in_threadpool(engine_manager.stream_cancel, engine_id, session_id)
+        raise
+
+
 @app.on_event("startup")
 def preload_models() -> None:
     def log_preload_event(event: dict) -> None:
         write_event(MODEL_LOG_PATH, {"time": utc_now(), **event})
 
     engine_manager.preload_all(log_preload_event)
+
+
+@app.on_event("shutdown")
+def stop_workers() -> None:
+    engine_manager.stop_all()
 
 
 @app.get("/api/health")
@@ -335,6 +444,30 @@ def engines() -> list[EngineInfo]:
 @app.get("/api/engine-status", response_model=list[EngineStatus])
 def engine_status() -> list[EngineStatus]:
     return engine_manager.list_statuses()
+
+
+@app.post("/api/engines/{engine_id}/activate", response_model=EngineStatus)
+def activate_engine(engine_id: str) -> EngineStatus:
+    try:
+        return engine_manager.activate_engine(engine_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/engines/{engine_id}/deactivate", response_model=EngineStatus)
+def deactivate_engine(engine_id: str) -> EngineStatus:
+    try:
+        return engine_manager.deactivate_engine(engine_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/api/transcribe", response_model=TranscriptionResponse)
@@ -409,25 +542,14 @@ async def decode_file(
         temperature,
     )
     total_time = time.perf_counter() - start
-    rtf = result.decode_time / duration if duration and duration > 0 else None
-    chars_per_second = len(result.text) / result.decode_time if result.decode_time > 0 else None
-    audio_seconds_per_second = duration / result.decode_time if duration and result.decode_time > 0 else None
-    response = TranscriptionResponse(
+    response = build_transcription_response(
+        result=result,
         request_id=request_id,
-        engine=spec.name,
-        model=spec.model,
+        spec=spec,
         mode=mode,
-        text=result.text,
-        segments=result.segments,
-        saved_audio_path=str(saved_audio_path) if saved_audio_path else None,
         audio_duration=duration,
-        model_load_time=round(result.model_load_time, 6),
-        decode_time=round(result.decode_time, 6),
-        total_time=round(total_time, 6),
-        rtf=round(rtf, 6) if rtf is not None else None,
-        chars_per_second=round(chars_per_second, 3) if chars_per_second is not None else None,
-        audio_seconds_per_second=round(audio_seconds_per_second, 3) if audio_seconds_per_second is not None else None,
-        timing_source=result.timing_source,
+        total_time=total_time,
+        saved_audio_path=saved_audio_path,
     )
     write_event(
         EVENT_LOG_PATH,
@@ -494,6 +616,22 @@ async def vad_stream(
         temp_path = Path(temp_dir)
         try:
             target_engine_ids = parse_engine_ids(engine_ids)
+            native_streaming_sessions = (
+                await create_native_streaming_sessions(
+                    target_engine_ids,
+                    language,
+                    beam_size,
+                    temperature,
+                )
+                if stream_mode == "streaming"
+                else {}
+            )
+            vad_engine_ids = [
+                engine_id
+                for engine_id in target_engine_ids
+                if engine_id not in native_streaming_sessions
+            ]
+            native_streaming_counts = {engine_id: 0 for engine_id in native_streaming_sessions}
             vad = create_vad(vad_id, VAD_CONFIG.get(vad_id, {}))
             while True:
                 message = await websocket.receive()
@@ -512,7 +650,7 @@ async def vad_stream(
                         settings=wav_settings,
                         temp_dir=temp_path,
                         request_id=request_id,
-                        engine_ids=target_engine_ids,
+                        engine_ids=vad_engine_ids,
                         language=language,
                         beam_size=beam_size,
                         temperature=temperature,
@@ -521,6 +659,31 @@ async def vad_stream(
                     )
                     if not ok:
                         return
+                    for engine_id, session in list(native_streaming_sessions.items()):
+                        try:
+                            result = await run_in_threadpool(engine_manager.stream_finish, engine_id, session)
+                        except Exception as exc:
+                            LOGGER.exception("Native streaming finish failed for engine_id=%s", engine_id)
+                            native_streaming_sessions.pop(engine_id, None)
+                            await send_websocket_json(
+                                websocket,
+                                {"type": "error", "engine_id": engine_id, "message": str(exc)},
+                            )
+                            continue
+                        if result.text.strip():
+                            ok = await send_streaming_result(
+                                websocket=websocket,
+                                engine_id=engine_id,
+                                result=result,
+                                request_id=request_id,
+                                mode="whisper_streaming_final",
+                                audio_duration=received_audio_seconds,
+                                utterance_index=native_streaming_counts[engine_id],
+                                message_type="utterance_final",
+                            )
+                            native_streaming_counts[engine_id] += 1
+                            if not ok:
+                                return
                     await send_websocket_json(
                         websocket,
                         {
@@ -559,6 +722,36 @@ async def vad_stream(
                     return
                 if not await send_websocket_json(websocket, {"type": "chunk_ack", "vad": vad_id}):
                     return
+
+                for engine_id, session in list(native_streaming_sessions.items()):
+                    if not await send_status_event(websocket, [engine_id], "인식 중", vad_id):
+                        return
+                    try:
+                        result = await run_in_threadpool(engine_manager.stream_chunk, engine_id, session, frames, wav_settings)
+                    except Exception as exc:
+                        LOGGER.exception("Native streaming chunk failed for engine_id=%s", engine_id)
+                        native_streaming_sessions.pop(engine_id, None)
+                        await send_websocket_json(
+                            websocket,
+                            {"type": "error", "engine_id": engine_id, "message": str(exc)},
+                        )
+                        continue
+                    if not result.text.strip():
+                        continue
+                    ok = await send_streaming_result(
+                        websocket=websocket,
+                        engine_id=engine_id,
+                        result=result,
+                        request_id=request_id,
+                        mode="whisper_streaming_partial",
+                        audio_duration=received_audio_seconds,
+                        utterance_index=native_streaming_counts[engine_id],
+                        message_type="partial",
+                    )
+                    native_streaming_counts[engine_id] += 1
+                    if not ok:
+                        return
+
                 if input_source == "file":
                     continue
 
@@ -568,7 +761,7 @@ async def vad_stream(
                     settings=wav_settings,
                     temp_dir=temp_path,
                     request_id=request_id,
-                    engine_ids=target_engine_ids,
+                    engine_ids=vad_engine_ids,
                     language=language,
                     beam_size=beam_size,
                     temperature=temperature,
@@ -585,8 +778,10 @@ async def vad_stream(
                 segment = vad.current_speech_segment()
                 if segment is None or not segment.pcm:
                     continue
+                if vad_segment_duration(segment) < STREAM_MIN_PARTIAL_AUDIO_SECONDS:
+                    continue
                 last_partial_at = now
-                if not await send_status_event(websocket, target_engine_ids, "인식 중", vad_id, segment.index):
+                if not await send_status_event(websocket, vad_engine_ids, "인식 중", vad_id, segment.index):
                     return
                 ok = await send_segment_results(
                     websocket=websocket,
@@ -594,7 +789,7 @@ async def vad_stream(
                     settings=wav_settings,
                     temp_dir=temp_path,
                     request_id=request_id,
-                    engine_ids=target_engine_ids,
+                    engine_ids=vad_engine_ids,
                     language=language,
                     beam_size=beam_size,
                     temperature=temperature,
@@ -610,5 +805,10 @@ async def vad_stream(
         except Exception as exc:
             await send_websocket_json(websocket, {"type": "error", "message": str(exc)})
         finally:
+            for engine_id, session in locals().get("native_streaming_sessions", {}).items():
+                try:
+                    await run_in_threadpool(engine_manager.stream_cancel, engine_id, session)
+                except Exception:
+                    LOGGER.exception("Failed to cancel native streaming session for engine_id=%s", engine_id)
             SESSION_SEMAPHORE.release()
             await asyncio.sleep(0)

@@ -30,17 +30,6 @@ SSL_AUTO_GENERATE="${DEMO_SSL_AUTO_GENERATE:-$(demo_config_value server.ssl.auto
 SSL_CERT_FILE_VALUE="${DEMO_SSL_CERT_FILE:-$(demo_config_value server.ssl.cert_file certs/demo.crt)}"
 SSL_KEY_FILE_VALUE="${DEMO_SSL_KEY_FILE:-$(demo_config_value server.ssl.key_file certs/demo.key)}"
 SSL_HOSTS="${DEMO_SSL_HOSTS:-$(demo_config_value server.ssl.hosts auto)}"
-START_WHISPER_CPP="${DEMO_START_WHISPER_CPP:-$(demo_config_value whisper_cpp.start_server 1)}"
-WHISPER_CPP_HOST="${DEMO_WHISPER_CPP_HOST:-$(demo_config_value whisper_cpp.host 127.0.0.1)}"
-WHISPER_CPP_PORT="${DEMO_WHISPER_CPP_PORT:-$(demo_config_value whisper_cpp.port 8100)}"
-WHISPER_CPP_DEVICE_INDEX="${DEMO_WHISPER_CPP_DEVICE_INDEX:-$(demo_config_value whisper_cpp.device_index 2)}"
-WHISPER_CPP_THREADS="${DEMO_WHISPER_CPP_THREADS:-$(demo_config_value whisper_cpp.threads 4)}"
-WHISPER_CPP_PROCESSORS="${DEMO_WHISPER_CPP_PROCESSORS:-$(demo_config_value whisper_cpp.processors 1)}"
-WHISPER_CPP_FLASH_ATTN="${DEMO_WHISPER_CPP_FLASH_ATTN:-$(demo_config_value whisper_cpp.flash_attention 0)}"
-WHISPER_CPP_BINARY_VALUE="${DEMO_WHISPER_CPP_BINARY:-$(demo_config_value whisper_cpp.binary third_party/whisper.cpp/build/bin/whisper-server)}"
-WHISPER_CPP_MODEL_PATH_VALUE="${DEMO_WHISPER_CPP_MODEL_PATH:-$(demo_config_value whisper_cpp.model_path third_party/whisper.cpp/models/ggml-large-v3-q5_0.bin)}"
-WHISPER_CPP_BINARY="$(resolve_project_path "$WHISPER_CPP_BINARY_VALUE")"
-WHISPER_CPP_MODEL_PATH="$(resolve_project_path "$WHISPER_CPP_MODEL_PATH_VALUE")"
 SSL_CERT_FILE="$(resolve_project_path "$SSL_CERT_FILE_VALUE")"
 SSL_KEY_FILE="$(resolve_project_path "$SSL_KEY_FILE_VALUE")"
 if [[ "$SSL_ENABLED" == "1" ]]; then
@@ -58,7 +47,6 @@ LEGACY_PID_DIR="$PROJECT_ROOT/logs/current"
 CURRENT_LOG_LINK="${DEMO_CURRENT_LOG_LINK:-$PROJECT_ROOT/logs/current_log}"
 BACKEND_PID="$PID_DIR/backend.pid"
 FRONTEND_PID="$PID_DIR/frontend.pid"
-WHISPER_CPP_PID="$PID_DIR/whisper_cpp_server.pid"
 
 export DEMO_RUN_DIR="$RUN_DIR"
 export DEMO_LOG_DIR="$LOG_DIR"
@@ -70,7 +58,6 @@ export DEMO_SSL_ENABLED="$SSL_ENABLED"
 export DEMO_SSL_CERT_FILE="$SSL_CERT_FILE"
 export DEMO_SSL_KEY_FILE="$SSL_KEY_FILE"
 export VITE_BACKEND_TARGET="$BACKEND_PROXY_TARGET"
-export DEMO_WHISPER_CPP_SERVER_URL="http://$WHISPER_CPP_HOST:$WHISPER_CPP_PORT/inference"
 
 usage() {
   cat <<EOF
@@ -99,10 +86,6 @@ Environment variables:
   DEMO_SAVE_DIR           Default: DEMO_RUN_DIR/saved_audio
   DEMO_PID_DIR            Default: logs/.pid
   DEMO_CURRENT_LOG_LINK   Default: logs/current_log
-  DEMO_START_WHISPER_CPP  Default: demo config whisper_cpp.start_server
-  DEMO_WHISPER_CPP_PORT   Default: demo config whisper_cpp.port
-  DEMO_WHISPER_CPP_FLASH_ATTN Default: demo config whisper_cpp.flash_attention
-  DEMO_WHISPER_CPP_MODEL_PATH Default: demo config whisper_cpp.model_path
 EOF
 }
 
@@ -270,15 +253,6 @@ ensure_ssl_cert() {
   echo "Certificate hosts: $hosts"
 }
 
-whisper_cpp_library_path() {
-  local build_dir
-  build_dir="$(cd "$(dirname "$WHISPER_CPP_BINARY")/.." && pwd)"
-  printf '%s:%s:%s' \
-    "$build_dir/src" \
-    "$build_dir/ggml/src" \
-    "$build_dir/ggml/src/ggml-cuda"
-}
-
 port_is_open() {
   local host="$1"
   local port="$2"
@@ -309,50 +283,12 @@ ensure_port_free() {
   fi
 }
 
-start_whisper_cpp_server() {
-  if [[ "$START_WHISPER_CPP" != "1" ]]; then
-    return
+ensure_single_backend_worker() {
+  if [[ "$GUNICORN_WORKERS" != "1" ]]; then
+    echo "DEMO_GUNICORN_WORKERS/server.gunicorn_workers must be 1 for the demo." >&2
+    echo "Model workers already provide engine-level process isolation; multiple backend workers would reuse the same internal worker ports." >&2
+    exit 1
   fi
-  if port_is_open "$WHISPER_CPP_HOST" "$WHISPER_CPP_PORT"; then
-    echo "whisper.cpp server already listening at http://$WHISPER_CPP_HOST:$WHISPER_CPP_PORT"
-    rm -f "$WHISPER_CPP_PID"
-    return
-  fi
-  if [[ ! -x "$WHISPER_CPP_BINARY" ]]; then
-    echo "whisper.cpp server binary not found or not executable: $WHISPER_CPP_BINARY" >&2
-    echo "Demo will continue without whisper.cpp server." >&2
-    return
-  fi
-  if [[ ! -f "$WHISPER_CPP_MODEL_PATH" ]]; then
-    echo "whisper.cpp model not found: $WHISPER_CPP_MODEL_PATH" >&2
-    echo "Demo will continue without whisper.cpp server." >&2
-    return
-  fi
-
-  local library_path
-  local flash_attn_arg
-  library_path="$(whisper_cpp_library_path)"
-  if [[ "$WHISPER_CPP_FLASH_ATTN" == "1" ]]; then
-    flash_attn_arg="--flash-attn"
-  else
-    flash_attn_arg="--no-flash-attn"
-  fi
-  (
-    cd "$PROJECT_ROOT"
-    LD_LIBRARY_PATH="$library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" exec "$WHISPER_CPP_BINARY" \
-      --model "$WHISPER_CPP_MODEL_PATH" \
-      --host "$WHISPER_CPP_HOST" \
-      --port "$WHISPER_CPP_PORT" \
-      --language ko \
-      --beam-size 1 \
-      --threads "$WHISPER_CPP_THREADS" \
-      --processors "$WHISPER_CPP_PROCESSORS" \
-      --device "$WHISPER_CPP_DEVICE_INDEX" \
-      "$flash_attn_arg" \
-      --no-language-probabilities
-  ) >"$LOG_DIR/whisper_cpp_server.log" 2>&1 &
-  echo "$!" >"$WHISPER_CPP_PID"
-  echo "whisper.cpp server: http://$WHISPER_CPP_HOST:$WHISPER_CPP_PORT"
 }
 
 backend_command() {
@@ -430,6 +366,7 @@ stop_orphan_demo_processes() {
   stop_matching_processes "frontend vite" "korean-asr-model-benchmark/demo/frontend/node_modules/.bin/vite"
   stop_matching_processes "frontend npm" "npm run dev -- --host .* --port"
   stop_matching_processes "backend gunicorn" "gunicorn app.main:app --chdir .*/korean-asr-model-benchmark/demo/backend"
+  stop_matching_processes "demo model worker" "app.worker_process --engine-id"
   stop_matching_processes "whisper.cpp server" "korean-asr-model-benchmark/third_party/whisper.cpp/build/bin/whisper-server"
 }
 
@@ -444,12 +381,12 @@ start_background() {
   ensure_dirs
   activate_conda
   check_dependencies
+  ensure_single_backend_worker
   ensure_ssl_cert
   ensure_port_free "backend" "$BACKEND_PORT"
   ensure_port_free "frontend" "$FRONTEND_PORT"
 
   refresh_current_log_link
-  start_whisper_cpp_server
 
   (
     backend_command
@@ -464,7 +401,7 @@ start_background() {
   echo "Backend:  $(public_scheme)://127.0.0.1:$BACKEND_PORT"
   echo "Frontend: $(public_scheme)://127.0.0.1:$FRONTEND_PORT"
   echo "API proxy: $BACKEND_PROXY_TARGET"
-  echo "whisper.cpp: http://$WHISPER_CPP_HOST:$WHISPER_CPP_PORT"
+  echo "whisper.cpp: managed by backend engine activation"
   echo "Logs:     $LOG_DIR"
   echo "Audio:    $SAVE_DIR"
 }
@@ -473,7 +410,6 @@ stop_all() {
   ensure_pid_dir
   stop_pid "frontend" "$FRONTEND_PID"
   stop_pid "backend" "$BACKEND_PID"
-  stop_pid "whisper.cpp server" "$WHISPER_CPP_PID"
   stop_orphan_demo_processes
 }
 
@@ -491,13 +427,7 @@ status() {
     echo "frontend stopped"
   fi
 
-  if is_running "$WHISPER_CPP_PID"; then
-    echo "whisper.cpp server running pid=$(cat "$WHISPER_CPP_PID")"
-  elif port_is_open "$WHISPER_CPP_HOST" "$WHISPER_CPP_PORT"; then
-    echo "whisper.cpp server running on port $WHISPER_CPP_PORT"
-  else
-    echo "whisper.cpp server stopped"
-  fi
+  echo "whisper.cpp server is managed by backend engine activation."
 }
 
 console() {
@@ -511,13 +441,13 @@ console() {
   ensure_dirs
   activate_conda
   check_dependencies
+  ensure_single_backend_worker
   ensure_ssl_cert
   ensure_port_free "backend" "$BACKEND_PORT"
   ensure_port_free "frontend" "$FRONTEND_PORT"
 
   local backend_pid=""
   local frontend_pid=""
-  local whisper_cpp_pid=""
 
   cleanup() {
     if [[ -n "$frontend_pid" ]]; then
@@ -526,17 +456,10 @@ console() {
     if [[ -n "$backend_pid" ]]; then
       kill "$backend_pid" >/dev/null 2>&1 || true
     fi
-    if [[ -n "$whisper_cpp_pid" ]]; then
-      kill "$whisper_cpp_pid" >/dev/null 2>&1 || true
-    fi
   }
   trap cleanup EXIT INT TERM
 
   refresh_current_log_link
-  start_whisper_cpp_server
-  if is_running "$WHISPER_CPP_PID"; then
-    whisper_cpp_pid="$(cat "$WHISPER_CPP_PID")"
-  fi
 
   (
     backend_command
@@ -551,7 +474,7 @@ console() {
   echo "Backend:  $(public_scheme)://127.0.0.1:$BACKEND_PORT"
   echo "Frontend: $(public_scheme)://127.0.0.1:$FRONTEND_PORT"
   echo "API proxy: $BACKEND_PROXY_TARGET"
-  echo "whisper.cpp: http://$WHISPER_CPP_HOST:$WHISPER_CPP_PORT"
+  echo "whisper.cpp: managed by backend engine activation"
   echo "Logs:     $LOG_DIR"
   echo "Audio:    $SAVE_DIR"
   echo "Press Ctrl-C to stop."

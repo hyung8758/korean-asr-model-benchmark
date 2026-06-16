@@ -20,6 +20,7 @@ const DEFAULT_DEMO_CONFIG = {
   },
   streaming: {
     partial_interval_seconds: 1.0,
+    min_partial_audio_seconds: 1.0,
     status_poll_interval_ms: 1000,
   },
   ui: {
@@ -32,13 +33,13 @@ const EMPTY_RESULT = {
   text: '',
   error: '',
   data: null,
+  metrics: null,
 };
 
 export default function App() {
   const [demoConfig, setDemoConfig] = useState(DEFAULT_DEMO_CONFIG);
   const [engines, setEngines] = useState([]);
   const [engineStatuses, setEngineStatuses] = useState({});
-  const [selectedEngineIds, setSelectedEngineIds] = useState([]);
   const [selectedModels, setSelectedModels] = useState({});
   const [selectedLanguages, setSelectedLanguages] = useState({});
   const [vadId, setVadId] = useState(DEFAULT_DEMO_CONFIG.defaults.vad);
@@ -76,9 +77,10 @@ export default function App() {
   useEffect(() => {
     async function loadInitialState() {
       try {
-        const [configResponse, enginesResponse] = await Promise.all([
+        const [configResponse, enginesResponse, statusResponse] = await Promise.all([
           fetch(`${API_BASE}/api/demo-config`),
           fetch(`${API_BASE}/api/engines`),
+          fetch(`${API_BASE}/api/engine-status`),
         ]);
         if (!configResponse.ok) {
           throw new Error('데모 설정을 불러오지 못했습니다.');
@@ -86,15 +88,19 @@ export default function App() {
         if (!enginesResponse.ok) {
           throw new Error('엔진 목록을 불러오지 못했습니다.');
         }
+        if (!statusResponse.ok) {
+          throw new Error('엔진 상태를 불러오지 못했습니다.');
+        }
         const config = await configResponse.json();
         const rows = await enginesResponse.json();
+        const statuses = await statusResponse.json();
         const defaultLanguage = config.defaults?.language || DEFAULT_DEMO_CONFIG.defaults.language;
 
         setDemoConfig(config);
         setMode(config.defaults?.mode || DEFAULT_DEMO_CONFIG.defaults.mode);
         setVadId(config.defaults?.vad || DEFAULT_DEMO_CONFIG.defaults.vad);
         setEngines(rows);
-        setSelectedEngineIds(rows.map((engine) => engine.id));
+        setEngineStatuses(Object.fromEntries(statuses.map((row) => [row.id, row])));
         setSelectedModels(Object.fromEntries(rows.map((engine) => [engine.id, engine.model])));
         setSelectedLanguages(Object.fromEntries(rows.map((engine) => [engine.id, defaultLanguage])));
         setResults(Object.fromEntries(rows.map((engine) => [engine.id, { ...EMPTY_RESULT }])));
@@ -111,11 +117,7 @@ export default function App() {
 
     async function refreshStatuses() {
       try {
-        const response = await fetch(`${API_BASE}/api/engine-status`);
-        if (!response.ok) {
-          return;
-        }
-        const rows = await response.json();
+        const rows = await fetchEngineStatuses();
         if (active) {
           setEngineStatuses(Object.fromEntries(rows.map((row) => [row.id, row])));
         }
@@ -162,8 +164,10 @@ export default function App() {
     removeEngineDragPreview();
   }, []);
 
+  const selectedEngineIds = engines.filter((engine) => isEngineActive(engine, engineStatuses[engine.id])).map((engine) => engine.id);
   const selectedEngines = engines.filter((engine) => selectedEngineIds.includes(engine.id));
-  const runnableEngines = selectedEngines.filter((engine) => engineStatuses[engine.id]?.state !== 'error');
+  const runnableEngines = selectedEngines.filter((engine) => isEngineReady(engineStatuses[engine.id]));
+  const gpuCapacity = demoConfig.resources?.gpu_indices?.length || 0;
 
   function showError(message) {
     setError(String(message || '알 수 없는 오류가 발생했습니다.'));
@@ -173,10 +177,44 @@ export default function App() {
     setError('');
   }
 
-  function toggleEngine(engineId) {
-    setSelectedEngineIds((current) => (
-      current.includes(engineId) ? current.filter((id) => id !== engineId) : [...current, engineId]
-    ));
+  async function fetchEngineStatuses() {
+    const response = await fetch(`${API_BASE}/api/engine-status`);
+    if (!response.ok) {
+      throw new Error('엔진 상태를 불러오지 못했습니다.');
+    }
+    return response.json();
+  }
+
+  async function refreshEnginesAndStatuses() {
+    const [enginesResponse, statuses] = await Promise.all([
+      fetch(`${API_BASE}/api/engines`),
+      fetchEngineStatuses(),
+    ]);
+    if (!enginesResponse.ok) {
+      throw new Error('엔진 목록을 불러오지 못했습니다.');
+    }
+    const rows = await enginesResponse.json();
+    setEngines((current) => mergeEnginesPreservingOrder(current, rows));
+    setEngineStatuses(Object.fromEntries(statuses.map((row) => [row.id, row])));
+  }
+
+  async function toggleEngine(engineId) {
+    const active = isEngineActive(engineById(engineId, engines), engineStatuses[engineId]);
+    const action = active ? 'deactivate' : 'activate';
+    updateResult(engineId, { ...EMPTY_RESULT, status: active ? '비활성화 중' : '모델 로딩 중' });
+    try {
+      const response = await fetch(`${API_BASE}/api/engines/${engineId}/${action}`, { method: 'POST' });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || '모델 상태를 변경하지 못했습니다.');
+      }
+      await refreshEnginesAndStatuses();
+      updateResult(engineId, { ...EMPTY_RESULT });
+    } catch (exception) {
+      updateResult(engineId, { ...EMPTY_RESULT });
+      await refreshEnginesAndStatuses().catch(() => {});
+      showError(exception.message);
+    }
   }
 
   function moveEngine(sourceId, targetId) {
@@ -262,12 +300,35 @@ export default function App() {
     }));
   }
 
+  function updateResultFrom(engineId, buildPatch) {
+    setResults((current) => {
+      const previous = current[engineId] || EMPTY_RESULT;
+      return {
+        ...current,
+        [engineId]: {
+          ...previous,
+          ...buildPatch(previous),
+        },
+      };
+    });
+  }
+
   function updateResultsFor(engineRows, patch) {
     engineRows.forEach((engine) => updateResult(engine.id, patch));
   }
 
-  function resetResultsFor(engineRows, status) {
-    updateResultsFor(engineRows, { ...EMPTY_RESULT, status });
+  function resetAllResultsForRun(engineRows, status) {
+    const runningEngineIds = new Set(engineRows.map((engine) => engine.id));
+    finalTextsRef.current = {};
+    setResults(Object.fromEntries(
+      engines.map((engine) => [
+        engine.id,
+        {
+          ...EMPTY_RESULT,
+          status: runningEngineIds.has(engine.id) ? status : EMPTY_RESULT.status,
+        },
+      ]),
+    ));
   }
 
   function failActiveRun(message, engineRows = runnableEngines) {
@@ -329,11 +390,15 @@ export default function App() {
 
   function validateRunnableEngines() {
     if (!selectedEngines.length) {
-      showError('최소 하나 이상의 엔진을 선택해야 합니다.');
+      showError('활성화된 엔진이 없습니다. 먼저 사용할 모델을 켜주세요.');
+      return false;
+    }
+    if (selectedEngines.some((engine) => isEnginePreparing(engineStatuses[engine.id]))) {
+      showError('모델 초기화가 진행 중입니다. 완료 후 다시 시도해주세요.');
       return false;
     }
     if (!runnableEngines.length) {
-      showError('실행 가능한 엔진이 없습니다. 로딩 실패 또는 server 미실행 상태를 확인하세요.');
+      showError('준비 완료된 엔진이 없습니다. 모델 로딩 또는 오류 상태를 확인하세요.');
       return false;
     }
     return true;
@@ -382,7 +447,7 @@ export default function App() {
     clearError();
     setLevel(0);
     setStatus('음성 업로드 중');
-    resetResultsFor(runnableEngines, '음성 업로드 중');
+    resetAllResultsForRun(runnableEngines, '음성 업로드 중');
 
     try {
       await openVadSocket(runId, '음성 업로드 중', 'file');
@@ -431,7 +496,7 @@ export default function App() {
       setLevel(0);
       setIsRecording(true);
       setStatus(mode === 'streaming' ? '스트리밍 녹음 중' : '녹음 중');
-      resetResultsFor(runnableEngines, mode === 'streaming' ? '연결 중' : '대기');
+      resetAllResultsForRun(runnableEngines, mode === 'streaming' ? '연결 중' : '대기');
 
       await openVadSocket(runId, 'VAD 진행 중', 'recording');
       recorderRef.current = await createPcmRecorder({
@@ -497,11 +562,13 @@ export default function App() {
         });
       }
       if (message.type === 'utterance_final') {
-        updateResult(message.engine_id, {
+        const finalText = appendFinalText(message.engine_id, message.result?.text);
+        updateResultFrom(message.engine_id, (previous) => ({
           status: Number.isInteger(message.utterance_total) ? `인식 중 (${message.utterance_index + 1}/${message.utterance_total})` : '완료',
           data: message.result,
-          text: appendFinalText(message.engine_id, message.result?.text),
-        });
+          text: finalText,
+          metrics: addFinalMetrics(previous.metrics, message.result),
+        }));
       }
       if (message.type === 'session_final') {
         updateResultsFor(runnableEngines, { status: '완료' });
@@ -640,8 +707,8 @@ export default function App() {
             <h1>STT 모델 비교 데모</h1>
           </div>
           <div className="status-block">
-            <strong>{selectedEngineIds.length}/{engines.length}</strong>
-            <span>{status}</span>
+            <strong>{selectedEngineIds.length}/{gpuCapacity}</strong>
+            <span>동작 모델 / GPU · {status}</span>
           </div>
         </div>
 
@@ -740,7 +807,7 @@ export default function App() {
           <EngineRow
             key={engine.id}
             engine={engine}
-            selected={selectedEngineIds.includes(engine.id)}
+            selected={isEngineActive(engine, engineStatuses[engine.id])}
             dragging={draggingEngineId === engine.id}
             result={results[engine.id] || EMPTY_RESULT}
             engineStatus={engineStatuses[engine.id]}
@@ -752,6 +819,7 @@ export default function App() {
             onModelChange={(value) => setSelectedModels((current) => ({ ...current, [engine.id]: value }))}
             onLanguageChange={(value) => setSelectedLanguages((current) => ({ ...current, [engine.id]: value }))}
             onToggle={() => toggleEngine(engine.id)}
+            toggleDisabled={isRecording || isFileProcessing || isFileStopping}
             onDragStart={(event) => startEngineDrag(event, engine)}
             onDragOver={(event) => {
               event.preventDefault();
@@ -812,8 +880,8 @@ function ErrorPopup({ message, onClose }) {
   );
 }
 
-function EngineRow({ engine, selected, dragging, result, engineStatus, selectedModel, selectedLanguage, modeChanged, mode, languageOptions, onModelChange, onLanguageChange, onToggle, onDragStart, onDragOver, onDragEnter, onDrop, onDragEnd }) {
-  const data = result.data;
+function EngineRow({ engine, selected, dragging, result, engineStatus, selectedModel, selectedLanguage, modeChanged, mode, languageOptions, onModelChange, onLanguageChange, onToggle, toggleDisabled, onDragStart, onDragOver, onDragEnter, onDrop, onDragEnd }) {
+  const metrics = result.metrics;
   const visibleStatus = rowStatus(selected, result, engineStatus, modeChanged, mode);
   const resultText = result.error || result.text || engineStatus?.error || '디코딩 결과 창';
   const hasResultText = Boolean(result.error || result.text || engineStatus?.error);
@@ -822,6 +890,7 @@ function EngineRow({ engine, selected, dragging, result, engineStatus, selectedM
     <article
       className={[
         'engine-row',
+        engine.theme === 'streaming' ? 'streaming-engine' : '',
         selected ? 'selected' : '',
         dragging ? 'dragging' : '',
       ].filter(Boolean).join(' ')}
@@ -849,6 +918,7 @@ function EngineRow({ engine, selected, dragging, result, engineStatus, selectedM
               type="button"
               aria-pressed={selected}
               aria-label={selected ? `${engine.name} 비활성화` : `${engine.name} 활성화`}
+              disabled={toggleDisabled}
               onClick={onToggle}
             >
               <Power size={12} />
@@ -894,10 +964,10 @@ function EngineRow({ engine, selected, dragging, result, engineStatus, selectedM
           <p className={hasResultText ? 'result-text' : 'result-placeholder'}>{resultText}</p>
         </div>
         <div className="mini-metrics text-zone" onClick={stopRowToggle} onKeyDown={stopRowToggle}>
-          <MiniMetric label="audio duration" value={formatSeconds(data?.audio_duration)} />
-          <MiniMetric label="decode time" value={formatSeconds(data?.decode_time)} tone="blue" />
-          <MiniMetric label="total time" value={formatSeconds(data?.total_time)} tone="green" />
-          <MiniMetric label="RTF" value={data?.rtf ?? '-'} tone="violet" />
+          <MiniMetric label="audio duration" value={formatMetricPair(metrics, 'audioDuration', formatSeconds)} />
+          <MiniMetric label="decode time" value={formatMetricPair(metrics, 'decodeTime', formatSeconds)} tone="blue" />
+          <MiniMetric label="total time" value={formatMetricPair(metrics, 'totalTime', formatSeconds)} tone="green" />
+          <MiniMetric label="RTF" value={formatMetricPair(metrics, 'rtf', formatNumber)} tone="violet" />
         </div>
       </div>
     </article>
@@ -912,7 +982,43 @@ function modelSizeLabel(model) {
 }
 
 function modelOptionsFor(engine) {
-  return [{ value: engine.model, label: modelSizeLabel(engine.model) }];
+  const options = engine.model_options?.length ? engine.model_options : [engine.model];
+  return options.map((model) => ({ value: model, label: modelSizeLabel(model) }));
+}
+
+function engineById(engineId, engines) {
+  return engines.find((engine) => engine.id === engineId) || null;
+}
+
+function mergeEnginesPreservingOrder(currentEngines, nextEngines) {
+  if (!currentEngines.length) {
+    return nextEngines;
+  }
+  const nextById = new Map(nextEngines.map((engine) => [engine.id, engine]));
+  const ordered = currentEngines
+    .map((engine) => nextById.get(engine.id))
+    .filter(Boolean);
+  const knownIds = new Set(ordered.map((engine) => engine.id));
+  const added = nextEngines.filter((engine) => !knownIds.has(engine.id));
+  return [...ordered, ...added];
+}
+
+function isEngineActive(engine, engineStatus) {
+  if (!engine) {
+    return false;
+  }
+  if (engineStatus?.state) {
+    return engineStatus.state !== 'inactive';
+  }
+  return Boolean(engine.active);
+}
+
+function isEngineReady(engineStatus) {
+  return engineStatus?.state === 'ready';
+}
+
+function isEnginePreparing(engineStatus) {
+  return ['loading', 'not_loaded', 'unloading'].includes(engineStatus?.state);
 }
 
 function engineNameById(engineId, engines) {
@@ -933,11 +1039,11 @@ function recognitionStatusLabel(message) {
 }
 
 function isActiveStatus(status) {
-  return ['인식 중', '연결 중', '스트리밍 중', '최종 인식 중', 'VAD 진행 중'].some((word) => status.startsWith(word));
+  return ['모델 로딩 중', 'server 시작 중', '비활성화 중', '인식 중', '연결 중', '스트리밍 중', '최종 인식 중', 'VAD 진행 중'].some((word) => status.startsWith(word));
 }
 
 function rowStatus(selected, result, engineStatus, modeChanged, mode) {
-  if (!selected) {
+  if (!selected || engineStatus?.state === 'inactive') {
     return { label: '비활성화', active: false };
   }
   if (modeChanged) {
@@ -973,10 +1079,105 @@ function MiniMetric({ label, value, tone = 'gray' }) {
 }
 
 function formatSeconds(value) {
-  if (value === undefined || value === null) {
+  if (!isFiniteNumber(value)) {
     return '-';
   }
-  return `${Number(value).toFixed(3)}s`;
+  return `${Number(value).toFixed(2)}s`;
+}
+
+function formatNumber(value) {
+  if (!isFiniteNumber(value)) {
+    return '-';
+  }
+  return Number(value).toFixed(2);
+}
+
+function formatMetricPair(metrics, key, formatter) {
+  const average = metricAverage(metrics, key);
+  const last = metrics?.[key]?.last;
+  if (!isFiniteNumber(average) && !isFiniteNumber(last)) {
+    return '-';
+  }
+  return (
+    <span className="metric-pair">
+      <span>avg {formatter(average)}</span>
+      <span>last {formatter(last)}</span>
+    </span>
+  );
+}
+
+function addFinalMetrics(previousMetrics, data) {
+  const metrics = previousMetrics || createMetricStats();
+  const next = {
+    ...metrics,
+    audioDuration: addMetricValue(metrics.audioDuration, data?.audio_duration),
+    decodeTime: addMetricValue(metrics.decodeTime, data?.decode_time),
+    totalTime: addMetricValue(metrics.totalTime, data?.total_time),
+    rtf: addMetricValue(metrics.rtf, data?.rtf),
+  };
+
+  const audioDuration = numberOrNull(data?.audio_duration);
+  const decodeTime = numberOrNull(data?.decode_time);
+  if (audioDuration !== null) {
+    next.totalAudioDuration += audioDuration;
+  }
+  if (decodeTime !== null) {
+    next.totalDecodeTime += decodeTime;
+  }
+  return next;
+}
+
+function createMetricStats() {
+  return {
+    totalAudioDuration: 0,
+    totalDecodeTime: 0,
+    audioDuration: createMetricBucket(),
+    decodeTime: createMetricBucket(),
+    totalTime: createMetricBucket(),
+    rtf: createMetricBucket(),
+  };
+}
+
+function createMetricBucket() {
+  return { sum: 0, count: 0, last: null };
+}
+
+function addMetricValue(bucket, value) {
+  const number = numberOrNull(value);
+  if (number === null) {
+    return bucket;
+  }
+  return {
+    sum: bucket.sum + number,
+    count: bucket.count + 1,
+    last: number,
+  };
+}
+
+function metricAverage(metrics, key) {
+  if (!metrics) {
+    return null;
+  }
+  if (key === 'rtf' && metrics.totalAudioDuration > 0) {
+    return metrics.totalDecodeTime / metrics.totalAudioDuration;
+  }
+  const bucket = metrics[key];
+  if (!bucket?.count) {
+    return null;
+  }
+  return bucket.sum / bucket.count;
+}
+
+function numberOrNull(value) {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function isFiniteNumber(value) {
+  return numberOrNull(value) !== null;
 }
 
 function waitForSocket(socket) {

@@ -1,3 +1,6 @@
 [submodule "third_party/whisper.cpp"]
 	path = third_party/whisper.cpp
 	url = https://github.com/ggml-org/whisper.cpp.git
+[submodule "third_party/whisper_streaming"]
+	path = third_party/whisper_streaming
+	url = https://github.com/ufal/whisper_streaming.git

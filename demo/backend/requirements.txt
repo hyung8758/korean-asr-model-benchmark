@@ -4,6 +4,8 @@ gunicorn
 python-multipart
 requests
 PyYAML
+librosa
+soundfile
 torch
 torchaudio
 openai-whisper

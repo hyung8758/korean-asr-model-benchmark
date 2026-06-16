@@ -7,6 +7,12 @@ class EngineInfo(BaseModel):
     provider: str
     model: str
     device: str
+    theme: str = "default"
+    active: bool = False
+    assigned_gpu: int | None = None
+    can_activate: bool = False
+    model_options: list[str] = []
+    language_options: list[str] = ["ko"]
     supports_offline: bool = True
     supports_streaming: bool = True
     note: str = ""
@@ -16,6 +22,8 @@ class EngineStatus(BaseModel):
     id: str
     state: str
     label: str
+    assigned_gpu: int | None = None
+    can_activate: bool = False
     load_time: float | None = None
     error: str = ""
 

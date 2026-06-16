@@ -4,7 +4,7 @@ from typing import Any
 
 from core.config import experiment_name, result_dir_for
 from core.io import write_json
-from decoding.audio import load_audio_array
+from data.audio import load_audio_array
 from decoding.decode_loop import DecodeOutput, decode_rows
 from decoding.run_utils import (
     fail_if_all_samples_failed,

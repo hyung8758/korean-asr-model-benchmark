@@ -166,7 +166,6 @@ def copy_optional_item_fields(row: dict[str, Any], item: dict[str, Any]) -> None
         "audio_end",
         "source_audio_start",
         "source_audio_end",
-        "finetuning_split",
     )
     for field in optional_fields:
         if field in item:

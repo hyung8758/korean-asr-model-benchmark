@@ -6,7 +6,7 @@ from core.cuda import validate_cuda_device
 from core.config import experiment_name, result_dir_for
 from core.io import write_json
 from core.precision import SUPPORTED_TORCH_PRECISIONS, torch_dtype_from_precision
-from decoding.audio import TARGET_SAMPLE_RATE, load_audio_array
+from data.audio import TARGET_SAMPLE_RATE, load_audio_array
 from decoding.decode_loop import DecodeOutput, decode_rows
 from decoding.run_utils import (
     fail_if_all_samples_failed,

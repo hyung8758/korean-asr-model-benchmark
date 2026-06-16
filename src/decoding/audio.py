@@ -10,7 +10,6 @@ from data.audio import (
     cut_audio_segment,
     has_audio_segment,
     load_audio,
-    load_audio_array,
     resample_audio,
 )
 

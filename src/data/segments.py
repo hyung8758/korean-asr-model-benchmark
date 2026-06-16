@@ -9,7 +9,7 @@ from data.audio import display_path, load_audio, resample_audio, safe_id
 from data.corpora import Candidate, archive_root_for
 
 
-DEFAULT_SPLIT_SAMPLE_RATE = 16000
+DEFAULT_SAMPLE_RATE = 16000
 
 
 def split_audio_root_for(data_root: Path) -> Path:
@@ -70,7 +70,7 @@ def prepare_split_audio_cache(
     candidates: list[Candidate],
     data_root: Path,
     project_root: Path,
-    sample_rate: int = DEFAULT_SPLIT_SAMPLE_RATE,
+    sample_rate: int = DEFAULT_SAMPLE_RATE,
     overwrite: bool = False,
 ) -> tuple[list[Candidate], list[dict[str, Any]]]:
     split_root = split_audio_root_for(data_root)

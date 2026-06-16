@@ -15,7 +15,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from data.audio import check_audio_runtime, display_path, prepare_output_dir, write_drop_rows, write_jsonl_line
 from data.corpora import BUCKETS, DATASETS, Candidate, discover_corpus_dirs, parse_candidates
 from data.manifest import ordered_benchmark_candidates, prepare_manifest_rows
-from data.segments import DEFAULT_SPLIT_SAMPLE_RATE, prepare_split_audio_cache
+from data.segments import DEFAULT_SAMPLE_RATE, prepare_split_audio_cache
 
 
 LOGGER = logging.getLogger("prepare_whisper_benchmark_data")
@@ -27,7 +27,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--data_root", type=Path, default=PROJECT_ROOT / "data" / "download")
     parser.add_argument("--output_root", type=Path, default=PROJECT_ROOT / "data" / "benchmark")
-    parser.add_argument("--split_sample_rate", type=int, default=DEFAULT_SPLIT_SAMPLE_RATE)
+    parser.add_argument("--sample_rate", type=int, default=DEFAULT_SAMPLE_RATE)
     parser.add_argument("--max_hours_per_corpus", type=float, default=None)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--write_kaldi", action="store_true")
@@ -153,7 +153,7 @@ def main() -> None:
         candidates=candidates,
         data_root=args.data_root,
         project_root=PROJECT_ROOT,
-        sample_rate=args.split_sample_rate,
+        sample_rate=args.sample_rate,
         overwrite=args.overwrite_split_audio,
     )
     check_audio_runtime(candidates)

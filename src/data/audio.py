@@ -24,12 +24,7 @@ def prepare_output_dir(output_root: Path, overwrite: bool) -> None:
 
 
 def display_path(path: Path, project_root: Path | None = None) -> str:
-    if project_root is None:
-        return str(path)
-    try:
-        return str(path.resolve().relative_to(project_root.resolve()))
-    except ValueError:
-        return str(path)
+    return str(path.resolve())
 
 
 def write_jsonl_line(handle, payload: dict[str, Any]) -> None:

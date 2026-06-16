@@ -18,16 +18,79 @@ server:
     max_audio_duration_seconds: 1200
     max_active_sessions: 3
 
-whisper_cpp:
-  start_server: 1
+resources:
+  gpu_indices: [0, 1, 2, 3, 4, 5]
+
+workers:
   host: 127.0.0.1
-  port: 8100
-  device_index: 2
-  threads: 4
-  processors: 1
-  flash_attention: 0
-  binary: third_party/whisper.cpp/build/bin/whisper-server
-  model_path: third_party/whisper.cpp/models/ggml-large-v3-q5_0.bin
+  base_port: 17000
+  parallel_preload: 3
+  startup_timeout_seconds: 30
+  load_timeout_seconds: 600
+
+engines:
+  - id: openai_whisper_large_v3
+    name: OpenAI Whisper
+    provider: OpenAI Whisper
+    kind: openai_whisper
+    model: large-v3
+    precision: fp16
+
+  - id: faster_whisper_large_v3
+    name: faster-whisper
+    provider: faster-whisper
+    kind: faster_whisper
+    model: large-v3
+    compute_type: float16
+
+  - id: whisper_cpp_server_large_v3
+    name: whisper.cpp
+    provider: whisper.cpp
+    kind: whisper_cpp_server
+    model: large-v3-q5_0
+    server:
+      host: 127.0.0.1
+      port: 8100
+      binary: third_party/whisper.cpp/build/bin/whisper-server
+      model_path: third_party/whisper.cpp/models/ggml-large-v3-q5_0.bin
+      threads: 4
+      processors: 1
+      flash_attention: 0
+
+  - id: qwen3_speech_recognition
+    name: Qwen3-ASR
+    provider: Qwen
+    kind: qwen_speech_recognition
+    model: Qwen/Qwen3-ASR-1.7B
+    precision: bfloat16
+    return_timestamps: 0
+
+  - id: huggingface_crisperwhisper
+    name: CrisperWhisper
+    provider: Hugging Face Transformers
+    kind: huggingface_transformers
+    model: nyrahealth/CrisperWhisper
+    precision: float16
+
+  - id: huggingface_ghost613_korean
+    name: ghost613 Korean Whisper
+    provider: Hugging Face Transformers
+    kind: huggingface_transformers
+    model: ghost613/whisper-large-v3-turbo-korean
+    precision: float16
+    return_timestamps: 0
+
+  - id: whisper_streaming_large_v3
+    name: Whisper-Streaming
+    provider: UFAL Whisper-Streaming
+    kind: whisper_streaming
+    model: large-v3
+    compute_type: float16
+    theme: streaming
+    streaming:
+      min_chunk_seconds: 1.0
+      buffer_trimming_seconds: 15.0
+    note: third_party/whisper_streaming OnlineASRProcessor with FasterWhisperASR backend.
 
 defaults:
   language: ko
@@ -50,6 +113,7 @@ recording:
 
 streaming:
   partial_interval_seconds: 1.0
+  min_partial_audio_seconds: 1.0
   status_poll_interval_ms: 1000
 
 vad:

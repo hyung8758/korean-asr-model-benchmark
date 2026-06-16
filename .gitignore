@@ -1,11 +1,10 @@
 # data / benchmark artifacts
 /data/
 /benchmark_data/
-/domain_finetuning/data/
-/domain_finetuning/exp/
 /results/
 /protected_exp/
 /history/
+/backup/
 
 # logs / outputs
 logs/
@@ -33,6 +32,9 @@ demo/backend/tmp/
 # third-party source can be tracked as submodules, but local builds/models stay out
 third_party/*
 !third_party/whisper.cpp/
+!third_party/whisper_streaming
+!third_party/whisper_streaming/
+!third_party/whisper_streaming/**
 !third_party/patches/
 !third_party/patches/*.patch
 third_party/whisper.cpp/build*/

@@ -21,11 +21,7 @@ torchaudio==2.8.0+cu128
 
 다른 CUDA 환경을 사용하면 먼저 PyTorch와 torchaudio 버전을 환경에 맞게 바꾼다.
 
-Whisper LoRA 파인튜닝은 별도 의존성 파일을 사용한다. 학습 실행 방법은 [domain_finetuning/README.md](../domain_finetuning/README.md)를 참고한다.
-
-```bash
-pip install -r domain_finetuning/requirements.txt
-```
+Whisper LoRA 도메인 파인튜닝 파이프라인은 별도 저장소 `whisper-domain-finetuning-to-whispercpp`에서 관리한다.
 
 데모 서버까지 같은 환경에서 실행하려면 backend 의존성을 추가로 설치한다.
 
@@ -70,6 +66,17 @@ pip install faster-whisper
 ```bash
 python scripts/run_faster_whisper.py
 ```
+
+### Whisper-Streaming
+
+Whisper-Streaming은 git submodule로 포함되어 있다. clone 후 submodule을 초기화하면 `third_party/whisper_streaming`에 upstream 코드가 준비된다.
+
+```bash
+git submodule update --init --recursive
+pip install -r demo/backend/requirements.txt
+```
+
+데모에서는 `third_party/whisper_streaming/whisper_online.py`의 `FasterWhisperASR`와 `OnlineASRProcessor`를 사용한다.
 
 ### whisper.cpp
 

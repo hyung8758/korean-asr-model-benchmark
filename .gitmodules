@@ -4,3 +4,6 @@
 [submodule "third_party/whisper_streaming"]
 	path = third_party/whisper_streaming
 	url = https://github.com/ufal/whisper_streaming.git
+[submodule "third_party/simul_streaming"]
+	path = third_party/simul_streaming
+	url = https://github.com/ufal/SimulStreaming.git

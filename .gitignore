@@ -35,6 +35,9 @@ third_party/*
 !third_party/whisper_streaming
 !third_party/whisper_streaming/
 !third_party/whisper_streaming/**
+!third_party/simul_streaming
+!third_party/simul_streaming/
+!third_party/simul_streaming/**
 !third_party/patches/
 !third_party/patches/*.patch
 third_party/whisper.cpp/build*/

@@ -78,6 +78,23 @@ pip install -r demo/backend/requirements.txt
 
 데모에서는 `third_party/whisper_streaming/whisper_online.py`의 `FasterWhisperASR`와 `OnlineASRProcessor`를 사용한다.
 
+### SimulStreaming
+
+SimulStreaming도 git submodule로 포함되어 있다. clone 후 submodule을 초기화하면 `third_party/simul_streaming`에 upstream 코드가 준비된다.
+
+```bash
+git submodule update --init --recursive
+pip install -r demo/backend/requirements.txt
+```
+
+데모에서는 SimulStreaming의 Simul-Whisper AlignAtt backend를 native streaming 엔진으로 사용한다. OpenAI Whisper `.pt` checkpoint는 아래 경로를 기준으로 준비된다.
+
+```text
+third_party/simul_streaming/models/large-v3.pt
+```
+
+파일이 없으면 SimulStreaming 로더가 해당 디렉토리에 모델을 다운로드한다.
+
 ### whisper.cpp
 
 whisper.cpp는 git submodule로 포함되어 있다. 저장소를 clone한 뒤 submodule을 초기화한다.

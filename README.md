@@ -8,6 +8,7 @@
 - faster-whisper
 - whisper.cpp
 - Whisper-Streaming
+- SimulStreaming
 - Hugging Face Transformers 기반 STT 모델
 - Qwen Speech Recognition
 

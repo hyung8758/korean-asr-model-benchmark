@@ -351,6 +351,13 @@ export default function App() {
     socketsRef.current = {};
   }
 
+  function cancelVadSocket() {
+    const socket = socketsRef.current.vad;
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send('cancel');
+    }
+  }
+
   function rejectPendingChunkAcks() {
     chunkAckResolversRef.current.forEach((item) => {
       window.clearTimeout(item.timer);
@@ -365,6 +372,22 @@ export default function App() {
       fileAbortControllerRef.current = null;
     }
     rejectPendingChunkAcks();
+  }
+
+  async function cancelEngineWorkers(engineRows) {
+    const requests = engineRows.map(async (engine) => {
+      const response = await fetch(`${API_BASE}/api/engines/${engine.id}/cancel-work`, { method: 'POST' });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(`${engine.name}: ${payload.detail || '작업 중지에 실패했습니다.'}`);
+      }
+    });
+    const results = await Promise.allSettled(requests);
+    const failed = results.find((result) => result.status === 'rejected');
+    if (failed) {
+      showError(failed.reason?.message || '일부 엔진 작업을 중지하지 못했습니다.');
+    }
+    await refreshEnginesAndStatuses().catch(() => {});
   }
 
   function clearStopWaitTimer() {
@@ -652,6 +675,8 @@ export default function App() {
   }
 
   function stopFileRecognition() {
+    const engineRows = [...runnableEngines];
+    cancelVadSocket();
     activeRunIdRef.current += 1;
     abortFileProcessing();
     closeStreamingSockets();
@@ -659,8 +684,9 @@ export default function App() {
     setIsFileStopping(true);
     setLevel(0);
     setStatus('중지 중');
-    updateResultsFor(runnableEngines, { status: '중지 중' });
-    waitUntilFileDecodingStops(runnableEngines.map((engine) => engine.id));
+    updateResultsFor(engineRows, { status: '중지 중' });
+    void cancelEngineWorkers(engineRows);
+    waitUntilFileDecodingStops(engineRows.map((engine) => engine.id));
   }
 
   function waitUntilFileDecodingStops(engineIds) {

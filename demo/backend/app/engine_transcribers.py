@@ -1,5 +1,8 @@
+import logging
+import math
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -11,6 +14,7 @@ from app.engine_models import EngineSpec, TranscriptionResult, project_path, tor
 
 
 ModelGetter = Callable[[EngineSpec], tuple[Any, float]]
+LOGGER = logging.getLogger(__name__)
 
 
 def load_engine_model(spec: EngineSpec) -> Any:
@@ -31,6 +35,8 @@ def load_engine_model(spec: EngineSpec) -> Any:
             )
     if spec.kind == "whisper_streaming":
         return load_whisper_streaming_model(spec)
+    if spec.kind == "simul_streaming":
+        return load_simul_streaming_model(spec)
     if spec.kind == "qwen_speech_recognition":
         from qwen_asr import Qwen3ASRModel
 
@@ -60,6 +66,8 @@ def transcribe_with_engine(
         return transcribe_faster_whisper(spec, get_model, audio_path, language, beam_size, temperature)
     if spec.kind == "whisper_streaming":
         return transcribe_whisper_streaming(spec, get_model, audio_path, language, beam_size, temperature)
+    if spec.kind == "simul_streaming":
+        return transcribe_simul_streaming(spec, get_model, audio_path, language, beam_size, temperature)
     if spec.kind == "whisper_cpp_server":
         return transcribe_whisper_cpp_server(spec, audio_path, language, beam_size, temperature)
     if spec.kind == "qwen_speech_recognition":
@@ -160,6 +168,100 @@ def transcribe_whisper_streaming(
         model_load_time=model_load_time,
         timing_source="whisper_streaming_online_processor",
     )
+
+
+def transcribe_simul_streaming(
+    spec: EngineSpec,
+    get_model: ModelGetter,
+    audio_path: Path,
+    language: str,
+    beam_size: int,
+    temperature: float,
+) -> TranscriptionResult:
+    asr, model_load_time = get_model(spec)
+    _asr_cls, online_cls = load_simul_streaming_classes()
+    configure_simul_streaming_asr(asr, language, beam_size, temperature)
+    audio = load_audio_for_pipeline(audio_path)
+    samples = audio["array"]
+    sample_rate = int(audio["sampling_rate"])
+    chunk_samples = max(1, int(spec.streaming_min_chunk_seconds * sample_rate))
+    processor = online_cls(asr)
+
+    start = time.perf_counter()
+    outputs = []
+    previous = 0
+    for end in chunk_end_points(len(samples), chunk_samples):
+        processor.insert_audio_chunk(samples[previous:end])
+        outputs.append(process_simul_streaming_iter(processor))
+        previous = end
+    outputs.append(finish_simul_streaming_processor(processor))
+
+    segments = format_simul_streaming_outputs(outputs)
+    text = " ".join(segment["text"] for segment in segments).strip()
+    return TranscriptionResult(
+        text=text,
+        segments=segments,
+        decode_time=time.perf_counter() - start,
+        model_load_time=model_load_time,
+        timing_source="simul_streaming_alignatt",
+    )
+
+
+def process_simul_streaming_iter(processor: Any) -> dict[str, Any]:
+    return normalize_simul_streaming_output(processor.process_iter())
+
+
+def finish_simul_streaming_processor(processor: Any) -> dict[str, Any]:
+    return normalize_simul_streaming_output(processor.finish())
+
+
+def normalize_simul_streaming_output(output: Any) -> dict[str, Any]:
+    if not isinstance(output, dict) or not output:
+        return {}
+    text = str(output.get("text", "")).strip()
+    words = normalize_simul_streaming_words(output.get("words"))
+    start = output.get("start")
+    end = output.get("end")
+    if not text:
+        return {}
+    if not words:
+        LOGGER.debug("SimulStreaming output skipped because word timestamps are empty.")
+        return {}
+    if not valid_timestamp(start) or not valid_timestamp(end) or float(end) <= float(start):
+        LOGGER.debug("SimulStreaming output skipped because timestamps are invalid: start=%s end=%s", start, end)
+        return {}
+    cleaned = dict(output)
+    cleaned["text"] = text
+    cleaned["words"] = words
+    return cleaned
+
+
+def normalize_simul_streaming_words(words: Any) -> list[dict[str, Any]]:
+    if not isinstance(words, list):
+        return []
+    cleaned = []
+    for word in words:
+        if not isinstance(word, dict):
+            continue
+        text = str(word.get("text", "")).strip()
+        start = word.get("start")
+        end = word.get("end")
+        if not text:
+            continue
+        if not valid_timestamp(start) or not valid_timestamp(end) or float(end) <= float(start):
+            continue
+        cleaned.append({**word, "text": text})
+    return cleaned
+
+
+def valid_timestamp(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    try:
+        timestamp = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(timestamp) and timestamp >= 0
 
 
 def transcribe_whisper_cpp_server(
@@ -313,6 +415,73 @@ def load_whisper_streaming_model(spec: EngineSpec) -> Any:
         )
 
 
+def load_simul_streaming_classes() -> tuple[type, type]:
+    source_dir = project_path("third_party/simul_streaming")
+    source_file = source_dir / "simulstreaming_whisper.py"
+    if not source_file.is_file():
+        raise FileNotFoundError(
+            "SimulStreaming submodule is missing. Run: git submodule update --init --recursive"
+        )
+    source_path = str(source_dir)
+    if source_path not in sys.path:
+        sys.path.insert(0, source_path)
+    from simulstreaming_whisper import SimulWhisperASR, SimulWhisperOnline
+
+    return SimulWhisperASR, SimulWhisperOnline
+
+
+def load_simul_streaming_model(spec: EngineSpec) -> Any:
+    simul_asr_cls, _online_cls = load_simul_streaming_classes()
+    model_path = spec.model_path or spec.model
+    ensure_parent_dir(project_path(model_path))
+    set_current_cuda_device(spec.device)
+    return simul_asr_cls(
+        language="ko",
+        model_path=str(project_path(model_path)),
+        cif_ckpt_path=None,
+        frame_threshold=spec.streaming_frame_threshold,
+        audio_max_len=spec.streaming_audio_max_seconds,
+        audio_min_len=spec.streaming_audio_min_seconds,
+        segment_length=spec.streaming_min_chunk_seconds,
+        beams=1,
+        task="transcribe",
+        decoder_type="greedy",
+        never_fire=spec.streaming_never_fire,
+        init_prompt=None,
+        static_init_prompt=None,
+        max_context_tokens=spec.streaming_max_context_tokens,
+        logdir=None,
+    )
+
+
+def configure_simul_streaming_asr(asr: Any, language: str, beam_size: int, temperature: float) -> None:
+    config = asr.model.cfg
+    if beam_size != config.beam_size:
+        raise ValueError("SimulStreaming demo worker는 현재 로딩 시점의 beam_size만 지원합니다.")
+    selected_language = None if language == "auto" else language
+    config.language = selected_language
+    asr.model.decode_options = replace(
+        asr.model.decode_options,
+        language=selected_language,
+        task="transcribe",
+    )
+    asr.model.create_tokenizer(selected_language)
+    asr.model.detected_language = selected_language
+    _ = temperature
+
+
+def set_current_cuda_device(device: str) -> None:
+    if not device.startswith("cuda:"):
+        return
+    import torch
+
+    torch.cuda.set_device(int(device.split(":", 1)[1]))
+
+
+def ensure_parent_dir(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
 def transcribe_faster_whisper_audio(
     model: Any,
     audio: Any,
@@ -374,6 +543,26 @@ def format_whisper_streaming_outputs(outputs: list[tuple[Any, Any, str]]) -> lis
         if not text:
             continue
         rows.append({"id": len(rows), "start": start, "end": end, "text": text})
+    return rows
+
+
+def format_simul_streaming_outputs(outputs: list[dict[str, Any]], start_id: int = 0) -> list[dict[str, Any]]:
+    rows = []
+    for output in outputs:
+        output = normalize_simul_streaming_output(output)
+        if not output:
+            continue
+        text = str(output.get("text", "")).strip()
+        rows.append(
+            {
+                "id": start_id + len(rows),
+                "start": output.get("start"),
+                "end": output.get("end"),
+                "text": text,
+                "words": output.get("words") or [],
+                "is_final": bool(output.get("is_final", False)),
+            }
+        )
     return rows
 
 

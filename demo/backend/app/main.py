@@ -20,6 +20,7 @@ from app.config import DEMO_CONFIG
 from app.engine_models import EngineSpec, TranscriptionResult
 from app.engines import engine_manager
 from app.schemas import EngineInfo, EngineStatus, TranscriptionResponse
+from app.streaming_sessions import supports_native_streaming
 from app.vad import VadSegment, create_vad
 
 
@@ -277,30 +278,35 @@ async def send_segment_results(
         except Exception as exc:
             return engine_id, None, exc
 
-    tasks = [asyncio.create_task(decode_one(engine_id)) for engine_id in engine_ids]
-    for task in asyncio.as_completed(tasks):
-        engine_id, response, error = await task
-        if error is None and response is not None:
-            payload = {
-                "type": message_type,
-                "engine_id": engine_id,
-                "utterance_index": segment.index,
-                "start": round(segment.start, 3),
-                "end": round(segment.end, 3),
-                "vad": vad_id,
-                "result": response_payload(response),
-            }
-            if utterance_total is not None:
-                payload["utterance_total"] = utterance_total
-        else:
-            payload = {
-                "type": "error",
-                "engine_id": engine_id,
-                "utterance_index": segment.index,
-                "message": str(error),
-            }
-        if not await send_websocket_json(websocket, payload):
-            return False
+    pending = {asyncio.create_task(decode_one(engine_id)) for engine_id in engine_ids}
+    while pending:
+        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            engine_id, response, error = await task
+            if error is None and response is not None:
+                payload = {
+                    "type": message_type,
+                    "engine_id": engine_id,
+                    "utterance_index": segment.index,
+                    "start": round(segment.start, 3),
+                    "end": round(segment.end, 3),
+                    "vad": vad_id,
+                    "result": response_payload(response),
+                }
+                if utterance_total is not None:
+                    payload["utterance_total"] = utterance_total
+            else:
+                payload = {
+                    "type": "error",
+                    "engine_id": engine_id,
+                    "utterance_index": segment.index,
+                    "message": str(error),
+                }
+            if not await send_websocket_json(websocket, payload):
+                for pending_task in pending:
+                    pending_task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                return False
     return True
 
 
@@ -381,7 +387,7 @@ async def send_streaming_result(
             "utterance_index": utterance_index,
             "start": None,
             "end": None,
-            "vad": "whisper-streaming",
+            "vad": "native-streaming",
             "result": response_payload(response),
         },
     )
@@ -397,7 +403,7 @@ async def create_native_streaming_sessions(
     try:
         for engine_id in engine_ids:
             spec = engine_manager.get_spec(engine_id)
-            if spec.kind != "whisper_streaming":
+            if not supports_native_streaming(spec):
                 continue
             sessions[engine_id] = await run_in_threadpool(
                 engine_manager.start_stream,
@@ -411,6 +417,10 @@ async def create_native_streaming_sessions(
         for engine_id, session_id in sessions.items():
             await run_in_threadpool(engine_manager.stream_cancel, engine_id, session_id)
         raise
+
+
+def use_native_streaming(stream_mode: str, input_source: str) -> bool:
+    return stream_mode == "streaming" and input_source != "file"
 
 
 @app.on_event("startup")
@@ -462,6 +472,18 @@ def activate_engine(engine_id: str) -> EngineStatus:
 def deactivate_engine(engine_id: str) -> EngineStatus:
     try:
         return engine_manager.deactivate_engine(engine_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/engines/{engine_id}/cancel-work", response_model=EngineStatus)
+def cancel_engine_work(engine_id: str) -> EngineStatus:
+    try:
+        return engine_manager.cancel_current_work(engine_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -623,7 +645,7 @@ async def vad_stream(
                     beam_size,
                     temperature,
                 )
-                if stream_mode == "streaming"
+                if use_native_streaming(stream_mode, input_source)
                 else {}
             )
             vad_engine_ids = [
@@ -635,6 +657,9 @@ async def vad_stream(
             vad = create_vad(vad_id, VAD_CONFIG.get(vad_id, {}))
             while True:
                 message = await websocket.receive()
+                if "text" in message and message["text"] == "cancel":
+                    await websocket.close(code=1000)
+                    return
                 if "text" in message and message["text"] == "stop":
                     if not await send_websocket_json(websocket, {"type": "finalizing", "vad": vad_id}):
                         return
@@ -676,7 +701,7 @@ async def vad_stream(
                                 engine_id=engine_id,
                                 result=result,
                                 request_id=request_id,
-                                mode="whisper_streaming_final",
+                                mode="native_streaming_final",
                                 audio_duration=received_audio_seconds,
                                 utterance_index=native_streaming_counts[engine_id],
                                 message_type="utterance_final",
@@ -743,7 +768,7 @@ async def vad_stream(
                         engine_id=engine_id,
                         result=result,
                         request_id=request_id,
-                        mode="whisper_streaming_partial",
+                        mode="native_streaming_partial",
                         audio_duration=received_audio_seconds,
                         utterance_index=native_streaming_counts[engine_id],
                         message_type="partial",

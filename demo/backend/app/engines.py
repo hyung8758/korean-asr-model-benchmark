@@ -38,6 +38,7 @@ class EngineManager:
         self.active_streams = {spec.id: 0 for spec in specs}
         self.status_lock = threading.RLock()
         self.statuses = {spec.id: self.inactive_status(spec.id) for spec in specs}
+        self.cancelling_workers: set[str] = set()
         worker_config = DEMO_CONFIG.get("workers", {})
         self.worker_host = str(worker_config.get("host", "127.0.0.1"))
         self.worker_base_port = int(worker_config.get("base_port", 17000))
@@ -266,9 +267,43 @@ class EngineManager:
             self.unload_engine(engine_id)
             return self.status_with_resource_fields(self.statuses[engine_id])
 
+    def cancel_current_work(self, engine_id: str) -> EngineStatus:
+        self.get_base_spec(engine_id)
+        if engine_id not in self.assigned_gpus:
+            return self.status_with_resource_fields(self.statuses[engine_id])
+
+        with self.status_lock:
+            self.cancelling_workers.add(engine_id)
+        self.active_streams[engine_id] = 0
+        self.set_status(engine_id, "loading", "작업 중지 후 모델 재초기화 중")
+        self.stop_worker(engine_id)
+
+        thread = threading.Thread(
+            target=self.reload_after_cancel,
+            args=(engine_id,),
+            daemon=True,
+            name=f"reload-after-cancel-{safe_name(engine_id)}",
+        )
+        thread.start()
+        return self.status_with_resource_fields(self.statuses[engine_id])
+
+    def reload_after_cancel(self, engine_id: str) -> None:
+        try:
+            if engine_id in self.assigned_gpus:
+                self.preload_one(engine_id)
+        finally:
+            with self.status_lock:
+                self.cancelling_workers.discard(engine_id)
+
+    def is_cancelling_worker(self, engine_id: str) -> bool:
+        with self.status_lock:
+            return engine_id in self.cancelling_workers
+
     def unload_engine(self, engine_id: str) -> None:
         self.set_status(engine_id, "unloading", "비활성화 중")
         self.stop_worker(engine_id)
+        with self.status_lock:
+            self.cancelling_workers.discard(engine_id)
         self.assigned_gpus.pop(engine_id, None)
         self.statuses[engine_id] = self.inactive_status(engine_id)
 
@@ -304,11 +339,14 @@ class EngineManager:
             try:
                 return record.client.transcribe(audio_path, language, beam_size, temperature)
             except Exception as exc:
-                LOGGER.exception("Decode failed for engine_id=%s", engine_id)
-                self.set_status(engine_id, "error", "인식 실패", error=str(exc))
+                if self.is_cancelling_worker(engine_id):
+                    LOGGER.info("Decode cancelled for engine_id=%s", engine_id)
+                else:
+                    LOGGER.exception("Decode failed for engine_id=%s", engine_id)
+                    self.set_status(engine_id, "error", "인식 실패", error=str(exc))
                 raise
             finally:
-                if self.statuses[engine_id].state != "error":
+                if not self.is_cancelling_worker(engine_id) and self.statuses[engine_id].state != "error":
                     self.set_status(engine_id, "ready", "준비 완료")
 
     def start_stream(self, engine_id: str, language: str, beam_size: int, temperature: float) -> str:
@@ -331,7 +369,7 @@ class EngineManager:
             try:
                 return record.client.stream_chunk(session_id, pcm, settings)
             finally:
-                if self.statuses[engine_id].state != "error":
+                if not self.is_cancelling_worker(engine_id) and self.statuses[engine_id].state != "error":
                     self.set_status(engine_id, "ready", "준비 완료")
 
     def stream_finish(self, engine_id: str, session_id: str) -> TranscriptionResult:
@@ -342,7 +380,7 @@ class EngineManager:
                 return record.client.stream_finish(session_id)
             finally:
                 self.decrement_active_stream(engine_id)
-                if self.statuses[engine_id].state != "error":
+                if not self.is_cancelling_worker(engine_id) and self.statuses[engine_id].state != "error":
                     self.set_status(engine_id, "ready", "준비 완료")
 
     def stream_cancel(self, engine_id: str, session_id: str) -> None:

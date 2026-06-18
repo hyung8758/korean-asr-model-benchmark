@@ -19,7 +19,7 @@ server:
     max_active_sessions: 3
 
 resources:
-  gpu_indices: [0, 1, 2, 3, 4, 5]
+  gpu_indices: [1, 2, 3, 4, 5]
 
 workers:
   host: 127.0.0.1
@@ -91,6 +91,22 @@ engines:
       min_chunk_seconds: 1.0
       buffer_trimming_seconds: 15.0
     note: third_party/whisper_streaming OnlineASRProcessor with FasterWhisperASR backend.
+
+  - id: simul_streaming_large_v3
+    name: SimulStreaming
+    provider: UFAL SimulStreaming
+    kind: simul_streaming
+    model: large-v3
+    model_path: third_party/simul_streaming/models/large-v3.pt
+    precision: float16
+    theme: streaming
+    streaming:
+      min_chunk_seconds: 1.0
+      audio_min_seconds: 0.0
+      audio_max_seconds: 30.0
+      frame_threshold: 25
+      never_fire: false
+    note: third_party/simul_streaming Simul-Whisper AlignAtt backend.
 
 defaults:
   language: ko

@@ -1,0 +1,76 @@
+diff --git a/simulstreaming_whisper.py b/simulstreaming_whisper.py
+index 6f4eccd..e268e65 100644
+--- a/simulstreaming_whisper.py
++++ b/simulstreaming_whisper.py
+@@ -156,12 +156,23 @@ class SimulWhisperOnline(OnlineProcessorInterface):
+             return []
+ 
+         pr = generation["progress"]
+-        if "result" not in generation or self.unicode_buffer != []:
+-            split_words, split_tokens = self.model.tokenizer.split_to_word_tokens(tokens)
+-        else:
+-            split_words, split_tokens = generation["result"]["split_words"], generation["result"]["split_tokens"]
++        try:
++            if "result" not in generation or self.unicode_buffer != []:
++                split_words, split_tokens = self.model.tokenizer.split_to_word_tokens(tokens)
++            else:
++                split_words, split_tokens = generation["result"]["split_words"], generation["result"]["split_tokens"]
++        except IndexError:
++            logger.debug("No timestamped words because tokenizer returned an incomplete unicode fragment.")
++            return []
+ 
+-        frames = [p["most_attended_frames"][0] for p in pr]
++        frames = []
++        for p in pr:
++            attended_frames = p.get("most_attended_frames") if isinstance(p, dict) else None
++            if not attended_frames:
++                return []
++            frames.append(attended_frames[0])
++        if len(frames) == 0:
++            return []
+         if self.unicode_buffer != []:
+             a = [frames[0]] * len(self.unicode_buffer)
+             frames = a + frames
+@@ -169,8 +180,12 @@ class SimulWhisperOnline(OnlineProcessorInterface):
+         tokens = tokens.copy()
+         ret = []
+         for sw,st in zip(split_words,split_tokens):
++            if len(sw.strip()) == 0 or len(st) == 0:
++                continue
+             b = None
+             for stt in st:
++                if len(tokens) == 0 or len(frames) == 0:
++                    return ret
+                 t,f = tokens.pop(0), frames.pop(0)
+                 if t != stt:
+                     raise ValueError(f"Token mismatch: {t} != {stt} at frame {f}.")
+@@ -197,7 +212,12 @@ class SimulWhisperOnline(OnlineProcessorInterface):
+             logger.debug(f"Hiding incomplete unicode character: {self.unicode_buffer}")
+             tokens = self.unicode_buffer + tokens
+             self.unicode_buffer = []  # clear the buffer after processing
+-        chars, _ = self.model.tokenizer.split_tokens_on_unicode(tokens)
++        try:
++            chars, _ = self.model.tokenizer.split_tokens_on_unicode(tokens)
++        except IndexError:
++            logger.debug(f"Hiding incomplete unicode fragment after tokenizer split failure: {tokens[-1:]}")
++            self.unicode_buffer = tokens[-1:]
++            return tokens[:-1]
+         if len(chars) > 0 and chars[-1].endswith('�'):
+             self.unicode_buffer = tokens[-1:]  # keep the last incomplete unicode character
+             logger.debug(f"Hiding incomplete unicode character: {tokens[-1:]}")
+@@ -225,6 +245,8 @@ class SimulWhisperOnline(OnlineProcessorInterface):
+         
+         # word-level timestamps
+         ts_words = self.timestamped_text(tokens, generation_progress)
++        if len(ts_words) == 0:
++            return {}
+         
+         self.beg = min(word['start'] for word in ts_words)  # it should be this
+         self.beg = max(self.beg, self.last_ts + 0.001)  # but let's create the timestamps non-decreasing -- at least last beg + 1
+@@ -257,4 +279,4 @@ class SimulWhisperOnline(OnlineProcessorInterface):
+ if __name__ == "__main__":
+ 
+     from simulstreaming.whisper.whisper_streaming.whisper_online_main import main_simulation_from_file
+-    main_simulation_from_file(simul_asr_factory, add_args=simulwhisper_args)
+\ No newline at end of file
++    main_simulation_from_file(simul_asr_factory, add_args=simulwhisper_args)

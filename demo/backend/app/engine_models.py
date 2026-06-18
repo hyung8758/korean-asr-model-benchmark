@@ -15,6 +15,7 @@ class EngineSpec:
     provider: str
     kind: str
     model: str
+    model_path: str = ""
     device: str = ""
     compute_type: str = "float16"
     precision: str = "float16"
@@ -32,6 +33,11 @@ class EngineSpec:
     theme: str = "default"
     streaming_min_chunk_seconds: float = 1.0
     streaming_buffer_trimming_seconds: float = 15.0
+    streaming_audio_min_seconds: float = 0.0
+    streaming_audio_max_seconds: float = 30.0
+    streaming_frame_threshold: int = 25
+    streaming_never_fire: bool = False
+    streaming_max_context_tokens: int | None = None
     note: str = ""
 
 
@@ -84,6 +90,7 @@ def engine_specs_from_config(config: dict[str, Any]) -> list[EngineSpec]:
                 provider=str(row.get("provider", row["name"])),
                 kind=str(row["kind"]),
                 model=model,
+                model_path=str(row.get("model_path", "")),
                 compute_type=str(row.get("compute_type", "float16")),
                 precision=str(row.get("precision", "float16")),
                 return_timestamps=bool_value(row.get("return_timestamps"), True),
@@ -99,12 +106,23 @@ def engine_specs_from_config(config: dict[str, Any]) -> list[EngineSpec]:
                 theme=str(row.get("theme", "default")),
                 streaming_min_chunk_seconds=float(streaming.get("min_chunk_seconds", 1.0)),
                 streaming_buffer_trimming_seconds=float(streaming.get("buffer_trimming_seconds", 15.0)),
+                streaming_audio_min_seconds=float(streaming.get("audio_min_seconds", 0.0)),
+                streaming_audio_max_seconds=float(streaming.get("audio_max_seconds", 30.0)),
+                streaming_frame_threshold=int(streaming.get("frame_threshold", 25)),
+                streaming_never_fire=bool_value(streaming.get("never_fire"), False),
+                streaming_max_context_tokens=parse_optional_int(streaming.get("max_context_tokens")),
                 note=str(row.get("note", "")),
             )
         )
     if not specs:
         raise RuntimeError("demo/config.yaml must define at least one engine.")
     return specs
+
+
+def parse_optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    return int(value)
 
 
 def torch_dtype(precision: str):

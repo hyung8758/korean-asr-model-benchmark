@@ -6,15 +6,7 @@
 
 ### 설치
 
-```bash
-conda activate korean-asr-benchmark
-conda install -c conda-forge nodejs -y
-pip install -r demo/backend/requirements.txt
-
-cd demo/frontend
-npm install
-cd ../..
-```
+데모 실행 전에 [install.md](install.md)의 conda 환경, submodule 초기화, patch 적용, backend/frontend 의존성 설치를 완료한다.
 
 ### 실행
 
@@ -78,7 +70,7 @@ workers:
 
 backend의 `server.gunicorn_workers`는 `1`로 둔다. 모델별 독립 process는 내부 worker가 담당하므로 backend worker를 늘리면 내부 worker 포트가 충돌한다.
 
-### 기능
+### 주요 기능
 
 - OpenAI Whisper, faster-whisper, whisper.cpp, Whisper-Streaming, SimulStreaming, Qwen3-ASR, Hugging Face 모델 비교
 - Silero VAD 기반 발화 단위 인식

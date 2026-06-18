@@ -28,12 +28,30 @@ Whisper LoRA 도메인 파인튜닝 파이프라인은 별도 저장소 `whisper
 ```bash
 conda install -c conda-forge nodejs -y
 pip install -r demo/backend/requirements.txt
+cd demo/frontend
+npm install
+cd ../..
 ```
 
 `nodejs`는 frontend 실행에 필요한 `npm`을 함께 설치한다. `gunicorn`은 `demo/backend/requirements.txt`에 포함되어 있다.
 데모의 마이크 녹음 구간 분리를 위해 `silero-vad`도 backend 의존성에 포함되어 있다.
 
 여러 엔진의 dependency가 충돌하면 이후 엔진별 conda 환경으로 분리한다. 지금 기본 문서는 단일 `korean-asr-benchmark` 환경을 기준으로 한다.
+
+### Submodule과 Patch
+
+whisper.cpp, Whisper-Streaming, SimulStreaming은 git submodule로 포함되어 있다. 저장소를 clone한 뒤 먼저 초기화한다.
+
+```bash
+git submodule update --init --recursive
+```
+
+일부 submodule은 이 저장소의 runner와 맞추기 위해 patch를 적용한다. patch는 자동 적용되지 않으므로 submodule 초기화나 업데이트 뒤에 다시 실행한다.
+
+```bash
+git -C third_party/whisper.cpp apply ../patches/whisper_cpp_server_timings.patch
+git -C third_party/simul_streaming apply ../patches/simul_streaming_empty_fragment_guard.patch
+```
 
 ### OpenAI Whisper
 
@@ -69,23 +87,9 @@ python scripts/run_faster_whisper.py
 
 ### Whisper-Streaming
 
-Whisper-Streaming은 git submodule로 포함되어 있다. clone 후 submodule을 초기화하면 `third_party/whisper_streaming`에 upstream 코드가 준비된다.
-
-```bash
-git submodule update --init --recursive
-pip install -r demo/backend/requirements.txt
-```
-
 데모에서는 `third_party/whisper_streaming/whisper_online.py`의 `FasterWhisperASR`와 `OnlineASRProcessor`를 사용한다.
 
 ### SimulStreaming
-
-SimulStreaming도 git submodule로 포함되어 있다. clone 후 submodule을 초기화하면 `third_party/simul_streaming`에 upstream 코드가 준비된다.
-
-```bash
-git submodule update --init --recursive
-pip install -r demo/backend/requirements.txt
-```
 
 데모에서는 SimulStreaming의 Simul-Whisper AlignAtt backend를 native streaming 엔진으로 사용한다. OpenAI Whisper `.pt` checkpoint는 아래 경로를 기준으로 준비된다.
 
@@ -97,19 +101,7 @@ third_party/simul_streaming/models/large-v3.pt
 
 ### whisper.cpp
 
-whisper.cpp는 git submodule로 포함되어 있다. 저장소를 clone한 뒤 submodule을 초기화한다.
-
-```bash
-git submodule update --init --recursive
-```
-
-이 벤치마크의 whisper.cpp server runner는 backend inference time을 `timings.inference_sec` 필드에서 읽는다. 이 필드는 upstream whisper.cpp server 기본 응답에는 없으므로 build 전에 timing patch를 적용한다.
-
-```bash
-git -C third_party/whisper.cpp apply ../patches/whisper_cpp_server_timings.patch
-```
-
-이 patch는 자동으로 적용되지 않는다. `git submodule update --init --recursive`는 upstream whisper.cpp를 가져오는 명령이고, patch 적용은 위 명령으로 별도 실행해야 한다. submodule을 업데이트하거나 초기화한 뒤에는 patch를 다시 적용한다.
+이 벤치마크의 whisper.cpp server runner는 backend inference time을 `timings.inference_sec` 필드에서 읽는다. build 전에 위의 patch 적용 단계를 완료한다.
 
 CUDA 빌드:
 

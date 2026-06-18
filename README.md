@@ -29,6 +29,8 @@ manifest.jsonl -> engine decoder -> predictions.jsonl/errors.jsonl -> metrics.js
 
 ### 빠른 실행 예시
 
+먼저 [설치와 모델 준비](docs/install.md)를 진행한다. 이 과정에서 submodule 초기화와 필요한 patch 적용까지 함께 수행한다.
+
 ```bash
 python scripts/data/prepare_whisper_benchmark_data.py \
   --data_root ./data/download \
@@ -44,6 +46,7 @@ python scripts/run_benchmark_suite.py \
 ### 데모 실행
 
 브라우저에서 마이크 녹음 또는 음성 파일 업로드로 여러 STT 엔진의 결과와 처리 시간을 한 화면에서 비교할 수 있다.
+데모 실행 전에도 [docs/install.md](docs/install.md)의 conda 환경, submodule, patch, frontend 설치 단계를 먼저 완료한다.
 
 ```bash
 bash scripts/run_demo.sh

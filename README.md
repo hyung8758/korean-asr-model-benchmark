@@ -45,22 +45,19 @@ python scripts/run_benchmark_suite.py \
 
 ### 데모 실행
 
-브라우저에서 마이크 녹음 또는 음성 파일 업로드로 여러 STT 엔진의 결과와 처리 시간을 한 화면에서 비교할 수 있다.
-데모 실행 전에도 [docs/install.md](docs/install.md)의 conda 환경, submodule, patch, frontend 설치 단계를 먼저 완료한다.
+브라우저에서 마이크 녹음 또는 음성 파일 업로드로 여러 STT 엔진의 결과와 처리 시간을 한 화면에서 비교한다. 실행 전 [docs/install.md](docs/install.md)의 데모 설치 단계를 완료한다.
 
 ```bash
 bash scripts/run_demo.sh
 ```
 
-내부/외부에서 접속할 때 frontend 포트만 연다.
+내부/외부에서 접속할 때는 frontend 포트만 연다. 실제 포트는 `demo/config.yaml`의 `server.frontend_port` 값에 맞춘다.
 
 ```text
-https://서버_IP_또는_도메인:16010
+https://서버_IP_또는_도메인:<frontend_port>
 ```
 
-파일 업로드와 마이크 녹음 모두 Silero VAD로 발화 단위를 자른 뒤 offline 또는 pseudo-streaming 방식으로 결과를 갱신한다. 실행 오류와 제한 초과 메시지는 화면 팝업으로 표시된다. 자세한 설정은 [docs/demo_server.md](docs/demo_server.md)를 참고한다.
-
-데모에서는 각 STT 엔진을 독립 worker process로 실행해 엔진 간 CUDA runtime 충돌을 줄인다.
+파일 업로드와 마이크 녹음은 Silero VAD로 발화 단위를 자른 뒤 offline 또는 pseudo-streaming 방식으로 처리한다. 각 STT 엔진은 독립 worker process에서 실행된다. 자세한 설정은 [docs/demo_server.md](docs/demo_server.md)를 참고한다.
 
 원본 데이터, 정제된 벤치마크 데이터, 결과물은 GitHub에 포함하지 않는다.
 

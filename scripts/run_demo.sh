@@ -43,7 +43,6 @@ RUN_DIR="${DEMO_RUN_DIR:-$PROJECT_ROOT/logs/$RUN_ID}"
 LOG_DIR="${DEMO_LOG_DIR:-$RUN_DIR}"
 SAVE_DIR="${DEMO_SAVE_DIR:-$RUN_DIR/saved_audio}"
 PID_DIR="${DEMO_PID_DIR:-$PROJECT_ROOT/logs/.pid}"
-LEGACY_PID_DIR="$PROJECT_ROOT/logs/current"
 CURRENT_LOG_LINK="${DEMO_CURRENT_LOG_LINK:-$PROJECT_ROOT/logs/current_log}"
 BACKEND_PID="$PID_DIR/backend.pid"
 FRONTEND_PID="$PID_DIR/frontend.pid"
@@ -96,23 +95,6 @@ ensure_dirs() {
 
 ensure_pid_dir() {
   mkdir -p "$PID_DIR"
-  migrate_legacy_pid_files
-}
-
-migrate_legacy_pid_files() {
-  if [[ "$LEGACY_PID_DIR" == "$PID_DIR" || ! -d "$LEGACY_PID_DIR" ]]; then
-    return
-  fi
-
-  local name
-  for name in backend frontend whisper_cpp_server; do
-    local old_pid="$LEGACY_PID_DIR/$name.pid"
-    local new_pid="$PID_DIR/$name.pid"
-    if [[ -f "$old_pid" && ! -f "$new_pid" ]]; then
-      mv "$old_pid" "$new_pid"
-    fi
-  done
-  rmdir "$LEGACY_PID_DIR" 2>/dev/null || true
 }
 
 refresh_current_log_link() {

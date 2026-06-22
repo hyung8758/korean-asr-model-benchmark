@@ -659,10 +659,13 @@ h1 {
 .engine-selector strong {
   display: block;
   min-width: 0;
+  overflow: hidden;
   overflow-wrap: anywhere;
   color: #111827;
   font-size: 15px;
   line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .engine-selector small {

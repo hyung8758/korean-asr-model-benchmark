@@ -695,6 +695,7 @@ async def vad_stream(
                                 {"type": "error", "engine_id": engine_id, "message": str(exc)},
                             )
                             continue
+                        native_streaming_sessions.pop(engine_id, None)
                         if result.text.strip():
                             ok = await send_streaming_result(
                                 websocket=websocket,
@@ -755,6 +756,10 @@ async def vad_stream(
                         result = await run_in_threadpool(engine_manager.stream_chunk, engine_id, session, frames, wav_settings)
                     except Exception as exc:
                         LOGGER.exception("Native streaming chunk failed for engine_id=%s", engine_id)
+                        try:
+                            await run_in_threadpool(engine_manager.stream_cancel, engine_id, session)
+                        except Exception:
+                            LOGGER.exception("Failed to cancel native streaming session after chunk error for engine_id=%s", engine_id)
                         native_streaming_sessions.pop(engine_id, None)
                         await send_websocket_json(
                             websocket,

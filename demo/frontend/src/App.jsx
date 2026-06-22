@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPcmRecorder, streamAudioFileChunks } from './audio.js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || window.location.origin;
+const ENGINE_ORDER_STORAGE_KEY = 'korean-asr-demo.engine-order.v1';
 
 const DEFAULT_DEMO_CONFIG = {
   defaults: {
@@ -99,7 +100,7 @@ export default function App() {
         setDemoConfig(config);
         setMode(config.defaults?.mode || DEFAULT_DEMO_CONFIG.defaults.mode);
         setVadId(config.defaults?.vad || DEFAULT_DEMO_CONFIG.defaults.vad);
-        setEngines(rows);
+        setEngines(applyStoredEngineOrder(rows));
         setEngineStatuses(Object.fromEntries(statuses.map((row) => [row.id, row])));
         setSelectedModels(Object.fromEntries(rows.map((engine) => [engine.id, engine.model])));
         setSelectedLanguages(Object.fromEntries(rows.map((engine) => [engine.id, defaultLanguage])));
@@ -194,7 +195,11 @@ export default function App() {
       throw new Error('엔진 목록을 불러오지 못했습니다.');
     }
     const rows = await enginesResponse.json();
-    setEngines((current) => mergeEnginesPreservingOrder(current, rows));
+    setEngines((current) => {
+      const ordered = mergeEnginesPreservingOrder(current, rows);
+      saveEngineOrder(ordered);
+      return ordered;
+    });
     setEngineStatuses(Object.fromEntries(statuses.map((row) => [row.id, row])));
   }
 
@@ -230,6 +235,7 @@ export default function App() {
       const next = [...current];
       const [moved] = next.splice(sourceIndex, 1);
       next.splice(targetIndex, 0, moved);
+      saveEngineOrder(next);
       return next;
     });
   }
@@ -433,6 +439,20 @@ export default function App() {
       showError(`업로드 파일이 너무 큽니다. 최대 ${maxUploadMb}MB까지 허용합니다.`);
       return false;
     }
+    return true;
+  }
+
+  function selectUploadedFile(file) {
+    if (!file) {
+      setSelectedFile(null);
+      return false;
+    }
+    if (!validateSelectedFile(file)) {
+      setSelectedFile(null);
+      return false;
+    }
+    clearError();
+    setSelectedFile(file);
     return true;
   }
 
@@ -762,12 +782,21 @@ export default function App() {
               if (isFileProcessing || isFileStopping) {
                 return;
               }
-              setSelectedFile(event.dataTransfer.files?.[0] || null);
+              selectUploadedFile(event.dataTransfer.files?.[0] || null);
             }}
           >
             <FileAudio size={18} />
             <span>{selectedFile ? selectedFile.name : '음성 파일 선택'}</span>
-            <input type="file" accept="audio/*" disabled={isFileProcessing || isFileStopping} onChange={(event) => setSelectedFile(event.target.files?.[0] || null)} />
+            <input
+              type="file"
+              accept="audio/*"
+              disabled={isFileProcessing || isFileStopping}
+              onChange={(event) => {
+                if (!selectUploadedFile(event.target.files?.[0] || null)) {
+                  event.target.value = '';
+                }
+              }}
+            />
           </label>
           <button
             className={isFileProcessing ? 'secondary-button stop-button' : 'secondary-button'}
@@ -1018,7 +1047,7 @@ function engineById(engineId, engines) {
 
 function mergeEnginesPreservingOrder(currentEngines, nextEngines) {
   if (!currentEngines.length) {
-    return nextEngines;
+    return applyStoredEngineOrder(nextEngines);
   }
   const nextById = new Map(nextEngines.map((engine) => [engine.id, engine]));
   const ordered = currentEngines
@@ -1027,6 +1056,38 @@ function mergeEnginesPreservingOrder(currentEngines, nextEngines) {
   const knownIds = new Set(ordered.map((engine) => engine.id));
   const added = nextEngines.filter((engine) => !knownIds.has(engine.id));
   return [...ordered, ...added];
+}
+
+function applyStoredEngineOrder(engineRows) {
+  return orderEnginesByIds(engineRows, readStoredEngineOrder());
+}
+
+function orderEnginesByIds(engineRows, engineIds) {
+  if (!engineIds.length) {
+    return engineRows;
+  }
+  const engineByIdMap = new Map(engineRows.map((engine) => [engine.id, engine]));
+  const ordered = engineIds.map((engineId) => engineByIdMap.get(engineId)).filter(Boolean);
+  const orderedIds = new Set(ordered.map((engine) => engine.id));
+  const added = engineRows.filter((engine) => !orderedIds.has(engine.id));
+  return [...ordered, ...added];
+}
+
+function readStoredEngineOrder() {
+  try {
+    const value = window.localStorage.getItem(ENGINE_ORDER_STORAGE_KEY);
+    const parsed = value ? JSON.parse(value) : [];
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveEngineOrder(engineRows) {
+  try {
+    window.localStorage.setItem(ENGINE_ORDER_STORAGE_KEY, JSON.stringify(engineRows.map((engine) => engine.id)));
+  } catch {
+  }
 }
 
 function isEngineActive(engine, engineStatus) {

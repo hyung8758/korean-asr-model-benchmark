@@ -7,3 +7,4 @@
 [submodule "third_party/simul_streaming"]
 	path = third_party/simul_streaming
 	url = https://github.com/ufal/SimulStreaming.git
+	ignore = untracked
